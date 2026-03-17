@@ -1,5 +1,6 @@
 import { Database } from "bun:sqlite";
 import { randomBytes } from "crypto";
+import { getDefaultSystemPrompt, getDefaultFormConfig, EXTRACTION_PROMPT, SYNTHESIS_PROMPT } from "./prompts";
 
 const db = new Database("data.db", { create: true });
 
@@ -54,6 +55,36 @@ db.exec(`
     created_at TEXT DEFAULT (datetime('now'))
   );
 `);
+
+// Add new columns to sessions table (SQLite doesn't support IF NOT EXISTS for ALTER TABLE)
+for (const col of [
+  "system_prompt TEXT DEFAULT ''",
+  "form_config TEXT DEFAULT '{}'",
+  "extraction_prompt TEXT DEFAULT ''",
+  "synthesis_prompt TEXT DEFAULT ''",
+]) {
+  try {
+    db.exec(`ALTER TABLE sessions ADD COLUMN ${col}`);
+  } catch {
+    // Column already exists — ignore
+  }
+}
+
+// Backfill any sessions with empty config
+const emptySessions = db.query("SELECT id FROM sessions WHERE system_prompt = '' OR form_config = '{}'").all() as { id: string }[];
+if (emptySessions.length > 0) {
+  const stmt = db.prepare("UPDATE sessions SET system_prompt = ?, form_config = ?, extraction_prompt = ?, synthesis_prompt = ? WHERE id = ?");
+  const defaults = {
+    system_prompt: getDefaultSystemPrompt(),
+    form_config: JSON.stringify(getDefaultFormConfig()),
+    extraction_prompt: EXTRACTION_PROMPT,
+    synthesis_prompt: SYNTHESIS_PROMPT,
+  };
+  for (const s of emptySessions) {
+    stmt.run(defaults.system_prompt, defaults.form_config, defaults.extraction_prompt, defaults.synthesis_prompt, s.id);
+  }
+  console.log(`Backfilled ${emptySessions.length} session(s) with default prompts`);
+}
 
 export function generateId(): string {
   return randomBytes(12).toString("hex");

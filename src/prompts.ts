@@ -98,15 +98,22 @@ For caregivers (UC2), a trust broker would verify the relationship (daughter, gu
   }
 };
 
-export function buildSystemPrompt(archetype: string, turnCount?: number, customRole?: string, activeMinutes?: number): string {
-  const a = ARCHETYPES[archetype];
-  if (!a) throw new Error(`Unknown archetype: ${archetype}`);
+export function getDefaultFormConfig() {
+  return {
+    title: "SMART Permission Tickets",
+    subtitle: "Discovery Exercise",
+    intro_text: "You're about to have a <strong>10-15 minute conversation</strong> with an AI interviewer about portable authorization in healthcare.\n<br /><br />\nThe interview is designed to surface real requirements by exploring <strong>tradeoffs, tensions, and competing priorities</strong>. The AI will push back on your positions — that's by design. There are no wrong answers; the goal is to understand where you stand and why.\n<br /><br />\nPlease limit your responses to content you are comfortable sharing openly with the Argonaut Project participants to help us make progress on this work.",
+    fields: [
+      { name: "name", label: "Your Name", type: "text", required: true, placeholder: "Jane Smith" },
+      { name: "organization", label: "Organization", type: "text", required: false, placeholder: "Acme Health" },
+    ],
+    archetypes: Object.entries(ARCHETYPES).map(([key, val]) => ({
+      key, label: val.label, description: val.description, interviewNotes: val.interviewNotes,
+    })),
+  };
+}
 
-  const roleLabel = archetype === 'custom' && customRole ? customRole : a.label;
-  const roleDescription = archetype === 'custom' && customRole
-    ? `Self-described role: "${customRole}". Adapt your questions to explore their specific perspective on portable authorization.`
-    : a.description;
-
+export function getDefaultSystemPrompt(): string {
   return `You are an AI interviewer running a ~10-minute discovery conversation about SMART Permission Tickets — a proposed standard for portable, verifiable authorization in healthcare.
 
 ## Your Goal
@@ -156,11 +163,11 @@ A Permission Ticket is a JWT containing: issuer identity, subject (whose data �
 - **Data holder market incentives:** Portal logins are also ecosystem touchpoints. Security concerns and business interests can align in hard-to-disentangle ways.
 
 ## This Participant
-**Role:** ${roleLabel}
-**Description:** ${roleDescription}
+**Role:** {{ROLE_LABEL}}
+**Description:** {{ROLE_DESCRIPTION}}
 
 ### Interview Notes for This Archetype
-${a.interviewNotes}
+{{INTERVIEW_NOTES}}
 
 ## How to Conduct the Interview
 
@@ -213,10 +220,53 @@ When the conversation has reached a natural conclusion — you've explored the k
 ### Pacing
 This is a ~10-minute interview. Aim for roughly 6-10 exchanges total, but follow the participant's lead — some people have a lot to say and some are more concise. Don't cut short a productive conversation, and don't drag out one that has reached its natural end.
 
-${turnCount != null || activeMinutes != null ? `**Current status:** ${turnCount != null ? `Exchange #${turnCount}.` : ''} ${activeMinutes != null ? `~${activeMinutes} minutes of active conversation.` : ''}
-${activeMinutes != null && activeMinutes >= 8 ? `The conversation is approaching the target length. When there's a natural pause, consider beginning to wrap up — but only if the key tensions have been explored. Don't rush.` : ''}` : ''}
+{{TURN_STATUS}}
 
-You are interviewing: ${roleLabel}.`;
+You are interviewing: {{ROLE_LABEL}}.`;
+}
+
+function buildTurnStatus(turnCount?: number, activeMinutes?: number): string {
+  if (turnCount == null && activeMinutes == null) return '';
+  let status = `**Current status:** ${turnCount != null ? `Exchange #${turnCount}.` : ''} ${activeMinutes != null ? `~${activeMinutes} minutes of active conversation.` : ''}\n`;
+  if (activeMinutes != null && activeMinutes >= 8) {
+    status += `The conversation is approaching the target length. When there's a natural pause, consider beginning to wrap up — but only if the key tensions have been explored. Don't rush.`;
+  }
+  return status;
+}
+
+export function buildSystemPromptFromTemplate(
+  template: string,
+  roleLabel: string,
+  roleDescription: string,
+  interviewNotes: string,
+  turnCount?: number,
+  activeMinutes?: number
+): string {
+  const turnStatus = buildTurnStatus(turnCount, activeMinutes);
+  return template
+    .replace(/\{\{ROLE_LABEL\}\}/g, roleLabel)
+    .replace(/\{\{ROLE_DESCRIPTION\}\}/g, roleDescription)
+    .replace(/\{\{INTERVIEW_NOTES\}\}/g, interviewNotes)
+    .replace(/\{\{TURN_STATUS\}\}/g, turnStatus);
+}
+
+export function buildSystemPrompt(archetype: string, turnCount?: number, customRole?: string, activeMinutes?: number): string {
+  const a = ARCHETYPES[archetype];
+  if (!a) throw new Error(`Unknown archetype: ${archetype}`);
+
+  const roleLabel = archetype === 'custom' && customRole ? customRole : a.label;
+  const roleDescription = archetype === 'custom' && customRole
+    ? `Self-described role: "${customRole}". Adapt your questions to explore their specific perspective on portable authorization.`
+    : a.description;
+
+  return buildSystemPromptFromTemplate(
+    getDefaultSystemPrompt(),
+    roleLabel,
+    roleDescription,
+    a.interviewNotes,
+    turnCount,
+    activeMinutes
+  );
 }
 
 export const EXTRACTION_PROMPT = `You are a qualitative research analyst reviewing an interview transcript from a discovery exercise about SMART Permission Tickets — a proposed standard for portable authorization in healthcare data access.

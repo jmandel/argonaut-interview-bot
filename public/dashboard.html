@@ -135,7 +135,21 @@
 
   .status-dot.joined { background: var(--yellow); }
   .status-dot.interviewing { background: var(--accent); animation: pulse 2s infinite; }
+  .status-dot.stale { background: var(--text-muted); }
   .status-dot.completed { background: var(--green); }
+
+  .participant-card.dimmed {
+    opacity: 0.45;
+  }
+
+  .participant-card.dimmed:hover {
+    opacity: 0.7;
+  }
+
+  .threshold-flag {
+    color: var(--orange);
+    font-size: 0.8125rem;
+  }
 
   @keyframes pulse {
     0%, 100% { opacity: 1; }
@@ -224,6 +238,58 @@
 
   .analysis-memo em {
     color: var(--text-muted);
+  }
+
+  /* ─── Synthesis Streaming ─── */
+  .synthesis-stream {
+    font-size: 0.8125rem;
+  }
+
+  .streaming-label {
+    font-size: 0.75rem;
+    color: var(--accent);
+    font-weight: 500;
+    margin-bottom: 0.5rem;
+  }
+
+  .synthesis-raw {
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    font-family: inherit;
+    font-size: 0.8125rem;
+    line-height: 1.6;
+    color: var(--text);
+    margin: 0;
+  }
+
+  .typing-cursor {
+    display: inline-block;
+    width: 2px;
+    height: 1em;
+    background: var(--accent);
+    margin-left: 1px;
+    vertical-align: text-bottom;
+    animation: cursor-blink 0.8s step-end infinite;
+  }
+
+  @keyframes cursor-blink {
+    50% { opacity: 0; }
+  }
+
+  .synthesis-card {
+    border-left: 3px solid var(--accent);
+  }
+
+  .copy-toolbar {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+    flex-wrap: wrap;
+  }
+
+  .btn-sm {
+    padding: 0.25rem 0.625rem;
+    font-size: 0.75rem;
   }
 
   /* ─── Synthesis ─── */
@@ -332,6 +398,79 @@
     color: var(--text-muted);
     padding: 2rem 1rem;
     font-size: 0.875rem;
+  }
+
+  /* ─── Create Session Form ─── */
+  .create-session-form {
+    max-width: 800px;
+    margin: 0 auto;
+    padding: 1.5rem;
+  }
+
+  .form-field {
+    margin-bottom: 1.25rem;
+  }
+
+  .form-field label {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    font-weight: 600;
+    font-size: 0.875rem;
+    margin-bottom: 0.375rem;
+  }
+
+  .form-field input[type="text"],
+  .form-field textarea {
+    width: 100%;
+    padding: 0.5rem 0.625rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 0.375rem;
+    color: var(--text);
+    font-size: 0.8125rem;
+    font-family: inherit;
+    resize: vertical;
+  }
+
+  .form-field textarea {
+    font-family: ui-monospace, 'Cascadia Code', 'Source Code Pro', Menlo, monospace;
+    font-size: 0.75rem;
+    line-height: 1.5;
+  }
+
+  .form-field input:focus,
+  .form-field textarea:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px rgba(13, 110, 253, 0.15);
+  }
+
+  .field-help {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    margin-bottom: 0.375rem;
+    line-height: 1.4;
+  }
+
+  .default-ref {
+    display: inline-flex;
+    gap: 0.375rem;
+    font-weight: 400;
+  }
+
+  .btn-link {
+    background: none;
+    border: none;
+    color: var(--accent);
+    font-size: 0.75rem;
+    cursor: pointer;
+    text-decoration: underline;
+    padding: 0;
+  }
+
+  .btn-link:hover {
+    color: var(--accent-hover);
   }
 </style>
 </head>

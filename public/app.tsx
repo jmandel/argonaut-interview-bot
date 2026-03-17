@@ -24,6 +24,7 @@ interface AppState {
   token: string | null;
   archetype: string | null;
   archetypes: Record<string, ArchetypeInfo>;
+  formConfig: any;
   messages: Msg[];
   streamingContent: string;
   isStreaming: boolean;
@@ -43,6 +44,7 @@ const useStore = create<AppState>(() => ({
   token: null,
   archetype: null,
   archetypes: {},
+  formConfig: null,
   messages: [],
   streamingContent: '',
   isStreaming: false,
@@ -131,10 +133,15 @@ async function readStream(resp: Response, onChunk: (text: string) => void): Prom
 function parseRoute() {
   const path = location.pathname;
   let match;
+  // /sessions/:slug/interviews/:token
+  if ((match = path.match(/^\/sessions\/([a-z0-9-]+)\/interviews\/([a-f0-9]+)$/)))
+    return { route: 'interview' as const, sessionId: match[1] as string | null, token: match[2] as string | null };
+  // Legacy /interview/:token
   if ((match = path.match(/^\/interview\/([a-f0-9]+)$/)))
-    return { route: 'interview' as const, token: match[1], sessionId: null as string | null };
-  if ((match = path.match(/^\/session\/([a-z0-9-]+)$/)))
-    return { route: 'session' as const, sessionId: match[1], token: null as string | null };
+    return { route: 'interview' as const, token: match[1] as string | null, sessionId: null as string | null };
+  // /sessions/:slug or /session/:slug
+  if ((match = path.match(/^\/sessions?\/([a-z0-9-]+)$/)))
+    return { route: 'session' as const, sessionId: match[1] as string | null, token: null as string | null };
   const params = new URLSearchParams(location.search);
   if (params.get('session'))
     return { route: 'session' as const, sessionId: params.get('session'), token: null as string | null };
@@ -142,18 +149,29 @@ function parseRoute() {
 }
 
 // ─── Init ───
-async function initApp() {
-  const archetypes: ArchetypeInfo[] = await fetch(`${API}/api/archetypes`).then(r => r.json());
-  const arcMap: Record<string, ArchetypeInfo> = {};
-  archetypes.forEach(a => { arcMap[a.key] = a; });
-  set({ archetypes: arcMap });
+async function loadSessionConfig(sid: string) {
+  try {
+    const config = await fetch(`${API}/api/sessions/${sid}/config`).then(r => r.json());
+    if (!config.error && config.form_config) {
+      const arcMap: Record<string, ArchetypeInfo> = {};
+      (config.form_config.archetypes || []).forEach((a: any) => {
+        arcMap[a.key] = { key: a.key, label: a.label, description: a.description };
+      });
+      set({ formConfig: config.form_config, archetypes: arcMap });
+    }
+  } catch {}
+}
 
+async function initApp() {
   const { route, token, sessionId } = parseRoute();
 
   if (route === 'interview' && token) {
     try {
       const p = await fetch(`${API}/api/participants/by-token/${token}`).then(r => r.json());
       if (p.error) throw new Error(p.error);
+      // Load session config for this participant's session
+      await loadSessionConfig(p.session_id);
+      const { archetypes: arcMap } = useStore.getState();
       set({
         token, sessionId: p.session_id, archetype: p.archetype,
         roleDisplay: arcMap[p.archetype]?.label || p.archetype,
@@ -188,7 +206,10 @@ async function initApp() {
     if (!session.error) set({ sessionName: session.name });
   } catch {}
 
-  if (route === 'join' && sid) history.pushState(null, '', `/session/${sid}`);
+  // Load session config (form_config, archetypes)
+  if (sid) await loadSessionConfig(sid);
+
+  if (route === 'join' && sid) history.pushState(null, '', `/sessions/${sid}`);
   set({ screen: 'join' });
 }
 
@@ -531,19 +552,27 @@ function MicButton({ onTranscript, inputRef }: { onTranscript: (text: string) =>
 
 function JoinScreen() {
   const archetypes = useStore(s => s.archetypes);
+  const formConfig = useStore(s => s.formConfig);
   const sessionId = useStore(s => s.sessionId);
   const sessionName = useStore(s => s.sessionName);
-  const [name, setName] = useState('');
-  const [org, setOrg] = useState('');
+  const [fieldValues, setFieldValues] = useState<Record<string, string>>({});
   const [arch, setArch] = useState('');
   const [customRole, setCustomRole] = useState('');
   const [joining, setJoining] = useState(false);
 
-  const customOk = arch !== 'custom' || customRole.trim();
-  const ready = name.trim() && arch && customOk;
+  if (!formConfig) return <div className="empty-state">Loading session configuration...</div>;
 
-  const hintText = !name.trim() && !arch ? 'Enter your name and select a role to continue.'
-    : !name.trim() ? 'Enter your name to continue.'
+  const fields = formConfig.fields;
+  const title = formConfig.title;
+  const subtitle = formConfig.subtitle;
+  const introText = formConfig.intro_text;
+
+  const customOk = arch !== 'custom' || customRole.trim();
+  const requiredFieldsFilled = fields.filter((f: any) => f.required).every((f: any) => (fieldValues[f.name] || '').trim());
+  const ready = requiredFieldsFilled && arch && customOk;
+
+  const hintText = !requiredFieldsFilled && !arch ? 'Enter your name and select a role to continue.'
+    : !requiredFieldsFilled ? 'Fill in the required fields to continue.'
     : !arch ? 'Select a role to continue.'
     : !customOk ? 'Describe your role to continue.'
     : '';
@@ -552,10 +581,12 @@ function JoinScreen() {
     if (!ready) return;
     setJoining(true);
     try {
+      const name = (fieldValues['name'] || '').trim();
+      const organization = (fieldValues['organization'] || '').trim();
       const resp = await fetch(`${API}/api/sessions/${sessionId}/participants`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: name.trim(), organization: org.trim(), archetype: arch, customRole: arch === 'custom' ? customRole.trim() : '' }),
+        body: JSON.stringify({ name, organization, archetype: arch, customRole: arch === 'custom' ? customRole.trim() : '' }),
       }).then(r => r.json());
 
       const roleDisplay = arch === 'custom' ? (customRole.trim() || 'Other') : (archetypes[arch]?.label || arch);
@@ -564,12 +595,12 @@ function JoinScreen() {
         archetype: arch,
         screen: 'chat',
         roleDisplay,
-        nameDisplay: org.trim() ? `${name.trim()} · ${org.trim()}` : name.trim(),
+        nameDisplay: organization ? `${name} · ${organization}` : name,
         chatStartTime: Date.now(),
         lastActivityTime: Date.now(),
         activeTimeMs: 0,
       });
-      history.pushState(null, '', `/interview/${resp.token}`);
+      history.pushState(null, '', `/sessions/${sessionId}/interviews/${resp.token}`);
       await startInterview(resp.token);
     } catch (err: any) {
       alert('Failed to join: ' + err.message);
@@ -577,39 +608,33 @@ function JoinScreen() {
     }
   };
 
-  const archList = Object.values(archetypes);
+  const archList = formConfig.archetypes;
 
   return (
     <div id="join-screen" style={{ display: 'flex' }}>
       <div className="join-header">
         {sessionName && <div className="session-badge">{sessionName}</div>}
-        <h1>SMART Permission Tickets</h1>
-        <p className="subtitle">Discovery Exercise</p>
+        <h1>{title}</h1>
+        <p className="subtitle">{subtitle}</p>
       </div>
 
-      <div className="welcome-intro">
-        You're about to have a <strong>10-15 minute conversation</strong> with an AI interviewer about portable authorization in healthcare.
-        <br /><br />
-        The interview is designed to surface real requirements by exploring <strong>tradeoffs, tensions, and competing priorities</strong>. The AI will push back on your positions — that's by design. There are no wrong answers; the goal is to understand where you stand and why.
-        <br /><br />
-        Please limit your responses to content you are comfortable sharing openly with the Argonaut Project participants to help us make progress on this work.
-      </div>
+      {introText && (
+        <div className="welcome-intro" dangerouslySetInnerHTML={{ __html: introText }} />
+      )}
 
-      <div className="form-group">
-        <label htmlFor="name">Your Name</label>
-        <input type="text" id="name" placeholder="Jane Smith" value={name}
-          onChange={e => { setName(e.target.value); }} />
-      </div>
-
-      <div className="form-group">
-        <label htmlFor="org">Organization <span style={{ fontWeight: 400 }}>(optional)</span></label>
-        <input type="text" id="org" placeholder="Acme Health" value={org} onChange={e => setOrg(e.target.value)} />
-      </div>
+      {fields.map((f: any) => (
+        <div className="form-group" key={f.name}>
+          <label htmlFor={f.name}>{f.label}{!f.required && <span style={{ fontWeight: 400 }}> (optional)</span>}</label>
+          <input type={f.type || 'text'} id={f.name} placeholder={f.placeholder || ''}
+            value={fieldValues[f.name] || ''}
+            onChange={e => setFieldValues(prev => ({ ...prev, [f.name]: e.target.value }))} />
+        </div>
+      ))}
 
       <div className="form-group">
         <label>Which best describes your role?</label>
         <div className="role-tiles">
-          {archList.map(a => (
+          {archList.map((a: any) => (
             <button key={a.key} type="button"
               className={`role-tile ${arch === a.key ? 'selected' : ''}`}
               onClick={() => { setArch(a.key); }}>

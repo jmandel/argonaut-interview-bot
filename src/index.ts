@@ -3,10 +3,11 @@ import { streamSSE } from "hono/streaming";
 import OpenAI from "openai";
 import db, { generateId, generateToken, slugify } from "./db";
 import {
-  ARCHETYPES,
-  buildSystemPrompt,
+  buildSystemPromptFromTemplate,
   EXTRACTION_PROMPT,
   SYNTHESIS_PROMPT,
+  getDefaultSystemPrompt,
+  getDefaultFormConfig,
 } from "./prompts";
 
 const openai = new OpenAI({
@@ -37,12 +38,36 @@ function notifyDashboard(event: string, data: unknown) {
 
 // ─── API Routes ───
 
+// Session defaults (for session creation form)
+app.get("/api/defaults", (c) => {
+  return c.json({
+    system_prompt: getDefaultSystemPrompt(),
+    form_config: getDefaultFormConfig(),
+    extraction_prompt: EXTRACTION_PROMPT,
+    synthesis_prompt: SYNTHESIS_PROMPT,
+  });
+});
+
 // Sessions
 app.post("/api/sessions", async (c) => {
-  const { name } = await c.req.json<{ name: string }>();
+  const body = await c.req.json<{
+    name: string;
+    system_prompt?: string;
+    form_config?: any;
+    extraction_prompt?: string;
+    synthesis_prompt?: string;
+  }>();
+  const { name } = body;
   const id = generateId();
   const slug = slugify(name);
-  db.run("INSERT INTO sessions (id, name, slug) VALUES (?, ?, ?)", [id, name, slug]);
+  const systemPrompt = body.system_prompt ?? getDefaultSystemPrompt();
+  const formConfig = body.form_config ? (typeof body.form_config === 'string' ? body.form_config : JSON.stringify(body.form_config)) : JSON.stringify(getDefaultFormConfig());
+  const extractionPrompt = body.extraction_prompt ?? EXTRACTION_PROMPT;
+  const synthesisPrompt = body.synthesis_prompt ?? SYNTHESIS_PROMPT;
+  db.run(
+    "INSERT INTO sessions (id, name, slug, system_prompt, form_config, extraction_prompt, synthesis_prompt) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    [id, name, slug, systemPrompt, formConfig, extractionPrompt, synthesisPrompt]
+  );
   return c.json({ id, name, slug });
 });
 
@@ -62,10 +87,43 @@ app.get("/api/sessions/:id", (c) => {
   return c.json(row);
 });
 
+// Session config endpoint
+app.get("/api/sessions/:sessionId/config", (c) => {
+  const param = c.req.param("sessionId");
+  let row = db.query("SELECT * FROM sessions WHERE id = ?").get(param) as any;
+  if (!row) row = db.query("SELECT * FROM sessions WHERE slug = ?").get(param) as any;
+  if (!row) return c.json({ error: "Not found" }, 404);
+  if (!row.system_prompt || !row.form_config || row.form_config === '{}') {
+    return c.json({ error: "Session config is incomplete — missing prompts or form_config" }, 500);
+  }
+  return c.json({
+    system_prompt: row.system_prompt,
+    form_config: JSON.parse(row.form_config),
+    extraction_prompt: row.extraction_prompt,
+    synthesis_prompt: row.synthesis_prompt,
+  });
+});
+
 // Resolve session param (could be ID or slug)
 function resolveSessionId(param: string): string | null {
   const row = db.query("SELECT id FROM sessions WHERE id = ? OR slug = ?").get(param, param) as any;
   return row?.id || null;
+}
+
+// Load session config from DB — no fallbacks, data must be present
+function loadSessionConfig(sessionId: string) {
+  const session = db.query("SELECT system_prompt, form_config, extraction_prompt, synthesis_prompt FROM sessions WHERE id = ?").get(sessionId) as any;
+  if (!session) throw new Error(`Session not found: ${sessionId}`);
+  if (!session.system_prompt) throw new Error(`Session ${sessionId} has no system_prompt`);
+  if (!session.form_config || session.form_config === '{}') throw new Error(`Session ${sessionId} has no form_config`);
+  if (!session.extraction_prompt) throw new Error(`Session ${sessionId} has no extraction_prompt`);
+  if (!session.synthesis_prompt) throw new Error(`Session ${sessionId} has no synthesis_prompt`);
+  return {
+    system_prompt: session.system_prompt,
+    form_config: JSON.parse(session.form_config),
+    extraction_prompt: session.extraction_prompt,
+    synthesis_prompt: session.synthesis_prompt,
+  };
 }
 
 // Participants
@@ -78,7 +136,10 @@ app.post("/api/sessions/:sessionId/participants", async (c) => {
     customRole?: string;
   }>();
 
-  if (!ARCHETYPES[archetype]) {
+  // Validate archetype against session's form_config
+  const config = loadSessionConfig(sessionId);
+  const validKeys = config.form_config.archetypes?.map((a: any) => a.key) || [];
+  if (!validKeys.includes(archetype)) {
     return c.json({ error: "Invalid archetype" }, 400);
   }
 
@@ -98,19 +159,19 @@ app.post("/api/sessions/:sessionId/participants", async (c) => {
 app.get("/api/sessions/:sessionId/participants", (c) => {
   const sessionId = resolveSessionId(c.req.param("sessionId")) || c.req.param("sessionId");
   const rows = db
-    .query("SELECT id, name, organization, archetype, status, created_at, completed_at FROM participants WHERE session_id = ? ORDER BY created_at")
-    .all(sessionId);
-  return c.json(rows);
-});
+    .query(`SELECT p.id, p.name, p.organization, p.archetype, p.status, p.created_at, p.completed_at,
+      (SELECT COUNT(*) FROM messages m WHERE m.participant_id = p.id AND m.role = 'user') as user_turns,
+      (SELECT MAX(m.created_at) FROM messages m WHERE m.participant_id = p.id) as last_message_at
+    FROM participants p WHERE p.session_id = ? ORDER BY p.created_at`)
+    .all(sessionId) as any[];
 
-// Archetypes list
-app.get("/api/archetypes", (c) => {
-  const list = Object.entries(ARCHETYPES).map(([key, val]) => ({
-    key,
-    label: val.label,
-    description: val.description,
-  }));
-  return c.json(list);
+  for (const r of rows) {
+    const userMsgs = db.query("SELECT content FROM messages WHERE participant_id = ? AND role = 'user'").all(r.id) as { content: string }[];
+    r.user_words = userMsgs.reduce((sum, m) => sum + m.content.split(/\s+/).filter(Boolean).length, 0);
+    r.meets_threshold = r.user_turns >= MIN_USER_TURNS && r.user_words >= MIN_USER_WORDS;
+  }
+
+  return c.json(rows);
 });
 
 // Chat - send message and stream response
@@ -143,7 +204,19 @@ app.post("/api/chat", async (c) => {
     .query("SELECT role, content FROM messages WHERE participant_id = ? ORDER BY id")
     .all(participant.id) as { role: string; content: string }[];
 
-  const systemPrompt = buildSystemPrompt(participant.archetype, turnCount, participant.custom_role, activeMinutes);
+  // Load session config for system prompt
+  const sessionConfig = loadSessionConfig(participant.session_id);
+  const archetypeInfo = sessionConfig.form_config.archetypes?.find((a: any) => a.key === participant.archetype);
+  const roleLabel = participant.archetype === 'custom' && participant.custom_role
+    ? participant.custom_role
+    : (archetypeInfo?.label || participant.archetype);
+  const roleDescription = participant.archetype === 'custom' && participant.custom_role
+    ? `Self-described role: "${participant.custom_role}". Adapt your questions to explore their specific perspective on portable authorization.`
+    : (archetypeInfo?.description || '');
+  const interviewNotes = archetypeInfo?.interviewNotes || '';
+  const systemPrompt = buildSystemPromptFromTemplate(
+    sessionConfig.system_prompt, roleLabel, roleDescription, interviewNotes, turnCount, activeMinutes
+  );
 
   const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
     { role: "system", content: systemPrompt },
@@ -237,8 +310,19 @@ app.post("/api/chat/start", async (c) => {
   db.run("UPDATE participants SET status = 'interviewing' WHERE id = ?", [participant.id]);
   notifyDashboard("participant_status", { id: participant.id, status: "interviewing" });
 
-  const systemPrompt = buildSystemPrompt(participant.archetype, undefined, participant.custom_role);
-  const archetype = ARCHETYPES[participant.archetype];
+  // Load session config for system prompt
+  const startConfig = loadSessionConfig(participant.session_id);
+  const startArchetype = startConfig.form_config.archetypes?.find((a: any) => a.key === participant.archetype);
+  const startRoleLabel = participant.archetype === 'custom' && participant.custom_role
+    ? participant.custom_role
+    : (startArchetype?.label || participant.archetype);
+  const startRoleDesc = participant.archetype === 'custom' && participant.custom_role
+    ? `Self-described role: "${participant.custom_role}". Adapt your questions to explore their specific perspective on portable authorization.`
+    : (startArchetype?.description || '');
+  const startNotes = startArchetype?.interviewNotes || '';
+  const systemPrompt = buildSystemPromptFromTemplate(
+    startConfig.system_prompt, startRoleLabel, startRoleDesc, startNotes
+  );
 
   return streamSSE(c, async (stream) => {
     let fullResponse = "";
@@ -338,7 +422,9 @@ app.get("/api/transcript/:token", (c) => {
     .query("SELECT role, content, created_at FROM messages WHERE participant_id = ? ORDER BY id")
     .all(participant.id) as { role: string; content: string; created_at: string }[];
 
-  const archLabel = ARCHETYPES[participant.archetype]?.label || participant.archetype;
+  const transcriptConfig = loadSessionConfig(participant.session_id);
+  const transcriptArchetype = transcriptConfig.form_config.archetypes?.find((a: any) => a.key === participant.archetype);
+  const archLabel = transcriptArchetype?.label || participant.archetype;
   let md = `# Interview Transcript\n\n`;
   md += `**Session:** ${participant.session_name}\n`;
   md += `**Participant:** ${participant.name}`;
@@ -369,10 +455,12 @@ app.get("/api/sessions/:sessionId/transcripts", (c) => {
     .query("SELECT * FROM participants WHERE session_id = ? ORDER BY created_at")
     .all(sessionId) as any[];
 
+  const allTranscriptsConfig = loadSessionConfig(sessionId);
   let md = `# All Interview Transcripts\n\n**Session:** ${session.name}\n**Exported:** ${new Date().toISOString()}\n**Participants:** ${participants.length}\n\n`;
 
   for (const p of participants) {
-    const archLabel = ARCHETYPES[p.archetype]?.label || p.archetype;
+    const allArchetype = allTranscriptsConfig.form_config.archetypes?.find((a: any) => a.key === p.archetype);
+    const archLabel = allArchetype?.label || p.archetype;
     md += `---\n\n## ${p.name}${p.organization ? ` (${p.organization})` : ''}\n`;
     md += `**Role:** ${archLabel} | **Status:** ${p.status}\n\n`;
 
@@ -429,14 +517,18 @@ app.post("/api/sessions/:sessionId/synthesize", async (c) => {
   return c.json({ status: "processing" });
 });
 
-async function runSynthesis(sessionId: string) {
-  // Build synthesis from full raw transcripts — no lossy intermediate extraction
+const MIN_USER_TURNS = 3;
+const MIN_USER_WORDS = 50;
+
+function buildTranscriptsText(sessionId: string): { text: string; count: number; skipped: string[] } {
   const participants = db
     .query("SELECT * FROM participants WHERE session_id = ? ORDER BY created_at")
     .all(sessionId) as any[];
 
+  const transcriptsConfig = loadSessionConfig(sessionId);
   let transcriptsText = '';
   let participantCount = 0;
+  const skipped: string[] = [];
 
   for (const p of participants) {
     const messages = db
@@ -444,9 +536,21 @@ async function runSynthesis(sessionId: string) {
       .all(p.id) as { role: string; content: string }[];
 
     if (messages.length === 0) continue;
+
+    const userMessages = messages.filter(m => m.role === 'user');
+    const userWordCount = userMessages.reduce((sum, m) => sum + m.content.split(/\s+/).filter(Boolean).length, 0);
+
+    if (userMessages.length < MIN_USER_TURNS || userWordCount < MIN_USER_WORDS) {
+      const tArchetype = transcriptsConfig.form_config.archetypes?.find((a: any) => a.key === p.archetype);
+      skipped.push(`${p.name} (${userMessages.length} turns, ${userWordCount} words)`);
+      console.log(`Skipping ${p.name} from synthesis: ${userMessages.length} user turns, ${userWordCount} user words (min: ${MIN_USER_TURNS} turns, ${MIN_USER_WORDS} words)`);
+      continue;
+    }
+
     participantCount++;
 
-    const archLabel = ARCHETYPES[p.archetype]?.label || p.archetype;
+    const tArchetype = transcriptsConfig.form_config.archetypes?.find((a: any) => a.key === p.archetype);
+    const archLabel = tArchetype?.label || p.archetype;
     transcriptsText += `\n${'='.repeat(60)}\n`;
     transcriptsText += `## ${p.name}${p.organization ? ` (${p.organization})` : ''} — ${archLabel}\n`;
     transcriptsText += `Status: ${p.status}\n`;
@@ -458,26 +562,53 @@ async function runSynthesis(sessionId: string) {
     }
   }
 
+  return { text: transcriptsText, count: participantCount, skipped };
+}
+
+async function runSynthesis(sessionId: string) {
+  const { text: transcriptsText, count: participantCount, skipped } = buildTranscriptsText(sessionId);
+
   if (participantCount === 0) {
-    notifyDashboard("synthesis_error", { sessionId, error: "No interviews with messages to synthesize" });
+    const reason = skipped.length > 0
+      ? `No interviews met the minimum threshold (${MIN_USER_TURNS}+ turns, ${MIN_USER_WORDS}+ words). Skipped: ${skipped.join(', ')}`
+      : "No interviews with messages to synthesize";
+    notifyDashboard("synthesis_error", { sessionId, error: reason });
     return;
   }
 
+  if (skipped.length > 0) {
+    console.log(`Skipped ${skipped.length} participant(s) from synthesis: ${skipped.join(', ')}`);
+  }
   console.log(`Running synthesis across ${participantCount} participants from raw transcripts...`);
 
-  const completion = await openai.chat.completions.create({
+  // Load session's synthesis prompt from DB
+  const synthConfig = loadSessionConfig(sessionId);
+  const synthPrompt = synthConfig.synthesis_prompt;
+
+  notifyDashboard("synthesis_streaming", { sessionId, text: "" });
+
+  const stream = await openai.chat.completions.create({
     model: SYNTHESIS_MODEL,
     messages: [
-      { role: "system", content: SYNTHESIS_PROMPT },
+      { role: "system", content: synthPrompt },
       {
         role: "user",
         content: `Here are the full interview transcripts from ${participantCount} participants:\n${transcriptsText}`,
       },
     ],
     max_tokens: 16384,
+    stream: true,
   });
 
-  const synthesisText = completion.choices[0]?.message?.content || "{}";
+  let synthesisText = "";
+  for await (const chunk of stream) {
+    const delta = chunk.choices[0]?.delta?.content || "";
+    if (delta) {
+      synthesisText += delta;
+      notifyDashboard("synthesis_chunk", { sessionId, text: synthesisText });
+    }
+  }
+
   const jsonMatch = synthesisText.match(/\{[\s\S]*\}/);
   const synthesisJson = jsonMatch ? jsonMatch[0] : synthesisText;
 
@@ -501,6 +632,17 @@ app.get("/api/sessions/:sessionId/synthesis", (c) => {
 
   if (!row) return c.json({ error: "No synthesis available" }, 404);
   return c.json(JSON.parse(row.data));
+});
+
+// Get synthesis inputs (for copy-to-clipboard)
+app.get("/api/sessions/:sessionId/synthesis-inputs", (c) => {
+  const sessionId = resolveSessionId(c.req.param("sessionId")) || c.req.param("sessionId");
+  const { text: transcriptsText, count: participantCount } = buildTranscriptsText(sessionId);
+  const inputsConfig = loadSessionConfig(sessionId);
+  return c.json({
+    transcripts: `Interview transcripts from ${participantCount} participants:\n${transcriptsText}`,
+    prompt: inputsConfig.synthesis_prompt,
+  });
 });
 
 // Get all analyses for a session
@@ -581,13 +723,19 @@ async function runFullExtraction(participantId: string) {
       .map((m) => `${m.role.toUpperCase()}: ${m.content}`)
       .join("\n\n");
 
+    // Load session's extraction prompt from DB
+    const extractConfig = loadSessionConfig(participant.session_id);
+    const extractPrompt = extractConfig.extraction_prompt;
+    const extractArchetype = extractConfig.form_config.archetypes?.find((a: any) => a.key === participant.archetype);
+    const extractArchLabel = extractArchetype?.label || participant.archetype;
+
     const completion = await openai.chat.completions.create({
       model: ANALYSIS_MODEL,
       messages: [
-        { role: "system", content: EXTRACTION_PROMPT },
+        { role: "system", content: extractPrompt },
         {
           role: "user",
-          content: `Participant archetype: ${participant.archetype} (${ARCHETYPES[participant.archetype]?.label})\nOrganization: ${participant.organization || '(not specified)'}\n\nFull transcript:\n\n${transcript}`,
+          content: `Participant archetype: ${participant.archetype} (${extractArchLabel})\nOrganization: ${participant.organization || '(not specified)'}\n\nFull transcript:\n\n${transcript}`,
         },
       ],
       max_tokens: 8192,
@@ -622,8 +770,8 @@ export default {
   idleTimeout: 255,
   routes: {
     "/": homepage,
+    "/sessions/*": homepage,
     "/session/*": homepage,
-    "/interview/*": homepage,
     "/dashboard": dashboard,
     "/dashboard.html": dashboard,
   },
