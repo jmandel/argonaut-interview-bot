@@ -287,7 +287,7 @@ Do NOT use section headers, headings, or a rigid template. Write continuously, w
 End with a brief bottom line (3-5 sentences): core stance, non-negotiables, biggest risk they see, and whether they'd likely be an obstacle or ally in a real standards process.
 
 Guidelines:
-- Write in analytical prose, not bullet lists or extracted fields.
+- Prefer analytical prose, but short bullet lists are acceptable when they make the analysis clearer. Avoid rigid extraction templates or overly schematic output.
 - Quote the participant directly and extensively — their words ARE the data.
 - Do not editorialize or judge — describe what you observed.
 - If the conversation was cut short or the participant disengaged, note that and analyze what you do have.
@@ -367,4 +367,3 @@ Return valid JSON matching this schema:
 }
 
 Return ONLY valid JSON. No markdown wrapping.`;
-
