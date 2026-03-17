@@ -7,6 +7,7 @@ import {
   EXTRACTION_PROMPT,
   SYNTHESIS_PROMPT,
   getDefaultSystemPrompt,
+  getOperationalBasePrompt,
   getDefaultFormConfig,
 } from "./prompts";
 
@@ -41,6 +42,7 @@ function notifyDashboard(event: string, data: unknown) {
 // Session defaults (for session creation form)
 app.get("/api/defaults", (c) => {
   return c.json({
+    operational_prompt: getOperationalBasePrompt(),
     system_prompt: getDefaultSystemPrompt(),
     form_config: getDefaultFormConfig(),
     extraction_prompt: EXTRACTION_PROMPT,
@@ -168,7 +170,7 @@ app.get("/api/sessions/:sessionId/participants", (c) => {
   for (const r of rows) {
     const userMsgs = db.query("SELECT content FROM messages WHERE participant_id = ? AND role = 'user'").all(r.id) as { content: string }[];
     r.user_words = userMsgs.reduce((sum, m) => sum + m.content.split(/\s+/).filter(Boolean).length, 0);
-    r.meets_threshold = r.user_turns >= MIN_USER_TURNS && r.user_words >= MIN_USER_WORDS;
+    r.meets_threshold = r.user_turns >= MIN_USER_TURNS || r.user_words >= MIN_USER_WORDS;
   }
 
   return c.json(rows);
@@ -215,7 +217,14 @@ app.post("/api/chat", async (c) => {
     : (archetypeInfo?.description || '');
   const interviewNotes = archetypeInfo?.interviewNotes || '';
   const systemPrompt = buildSystemPromptFromTemplate(
-    sessionConfig.system_prompt, roleLabel, roleDescription, interviewNotes, turnCount, activeMinutes
+    sessionConfig.system_prompt,
+    participant.name,
+    participant.organization || "",
+    roleLabel,
+    roleDescription,
+    interviewNotes,
+    turnCount,
+    activeMinutes
   );
 
   const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
@@ -321,7 +330,12 @@ app.post("/api/chat/start", async (c) => {
     : (startArchetype?.description || '');
   const startNotes = startArchetype?.interviewNotes || '';
   const systemPrompt = buildSystemPromptFromTemplate(
-    startConfig.system_prompt, startRoleLabel, startRoleDesc, startNotes
+    startConfig.system_prompt,
+    participant.name,
+    participant.organization || "",
+    startRoleLabel,
+    startRoleDesc,
+    startNotes
   );
 
   return streamSSE(c, async (stream) => {
@@ -540,10 +554,10 @@ function buildTranscriptsText(sessionId: string): { text: string; count: number;
     const userMessages = messages.filter(m => m.role === 'user');
     const userWordCount = userMessages.reduce((sum, m) => sum + m.content.split(/\s+/).filter(Boolean).length, 0);
 
-    if (userMessages.length < MIN_USER_TURNS || userWordCount < MIN_USER_WORDS) {
+    if (userMessages.length < MIN_USER_TURNS && userWordCount < MIN_USER_WORDS) {
       const tArchetype = transcriptsConfig.form_config.archetypes?.find((a: any) => a.key === p.archetype);
       skipped.push(`${p.name} (${userMessages.length} turns, ${userWordCount} words)`);
-      console.log(`Skipping ${p.name} from synthesis: ${userMessages.length} user turns, ${userWordCount} user words (min: ${MIN_USER_TURNS} turns, ${MIN_USER_WORDS} words)`);
+      console.log(`Skipping ${p.name} from synthesis: ${userMessages.length} user turns, ${userWordCount} user words (min: ${MIN_USER_TURNS} turns OR ${MIN_USER_WORDS} words)`);
       continue;
     }
 
@@ -570,7 +584,7 @@ async function runSynthesis(sessionId: string) {
 
   if (participantCount === 0) {
     const reason = skipped.length > 0
-      ? `No interviews met the minimum threshold (${MIN_USER_TURNS}+ turns, ${MIN_USER_WORDS}+ words). Skipped: ${skipped.join(', ')}`
+      ? `No interviews met the minimum threshold (${MIN_USER_TURNS}+ turns OR ${MIN_USER_WORDS}+ words). Skipped: ${skipped.join(', ')}`
       : "No interviews with messages to synthesize";
     notifyDashboard("synthesis_error", { sessionId, error: reason });
     return;

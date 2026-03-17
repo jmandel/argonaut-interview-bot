@@ -288,6 +288,7 @@ function DefaultReference({ label, getText }: { label: string; getText: () => Pr
 
 function CreateSessionView() {
   const [name, setName] = useState('');
+  const [operationalPrompt, setOperationalPrompt] = useState('');
   const [systemPrompt, setSystemPrompt] = useState('');
   const [formConfig, setFormConfig] = useState('');
   const [extractionPrompt, setExtractionPrompt] = useState('');
@@ -296,7 +297,10 @@ function CreateSessionView() {
   const [defaults, setDefaults] = useState<any>(null);
 
   useEffect(() => {
-    fetch(`${API}/api/defaults`).then(r => r.json()).then(setDefaults);
+    fetch(`${API}/api/defaults`).then(r => r.json()).then((data) => {
+      setDefaults(data);
+      setOperationalPrompt(data.operational_prompt || '');
+    });
   }, []);
 
   const getDefault = (key: string) => async () => {
@@ -355,12 +359,21 @@ function CreateSessionView() {
 
         <div className="form-field">
           <label>
-            System Prompt
-            <DefaultReference label="System Prompt" getText={getDefault('system_prompt')} />
+            Built-In Operational Prompt
+            <DefaultReference label="Operational Prompt" getText={getDefault('operational_prompt')} />
           </label>
-          <p className="field-help">The full interviewer system prompt template. Use {'{{ROLE_LABEL}}'}, {'{{ROLE_DESCRIPTION}}'}, {'{{INTERVIEW_NOTES}}'}, {'{{TURN_STATUS}}'} as placeholders.</p>
+          <p className="field-help">Always-present interviewer instructions. This base prompt is built into the app, shown here for inspection, and is not editable per session.</p>
+          <textarea rows={10} value={operationalPrompt} readOnly />
+        </div>
+
+        <div className="form-field">
+          <label>
+            Project Prompt
+            <DefaultReference label="Project Prompt" getText={getDefault('system_prompt')} />
+          </label>
+          <p className="field-help">Project-specific context, goals, tensions, and technical background. This editable prompt is appended after the built-in operational prompt at runtime.</p>
           <textarea rows={12} value={systemPrompt} onChange={e => setSystemPrompt(e.target.value)}
-            placeholder="Paste your system prompt here..." />
+            placeholder="Paste your project-specific prompt here..." />
         </div>
 
         <div className="form-field">

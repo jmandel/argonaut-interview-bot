@@ -15,6 +15,10 @@ type SessionRecord = {
   synthesis_prompt?: string;
 };
 
+type DefaultsRecord = {
+  operational_prompt?: string;
+};
+
 function parseFormConfig(value: SessionRecord['form_config']): string {
   if (!value) return '';
   if (typeof value === 'string') {
@@ -29,6 +33,7 @@ function parseFormConfig(value: SessionRecord['form_config']): string {
 
 function useSessionRecord() {
   const [session, setSession] = useState<SessionRecord | null>(null);
+  const [defaults, setDefaults] = useState<DefaultsRecord | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -41,21 +46,24 @@ function useSessionRecord() {
       return;
     }
 
-    fetch(`${API}/api/sessions/${id}`)
-      .then(r => r.json())
-      .then((data) => {
-        if (data.error) throw new Error(data.error);
-        setSession(data);
+    Promise.all([
+      fetch(`${API}/api/sessions/${id}`).then(r => r.json()),
+      fetch(`${API}/api/defaults`).then(r => r.json()),
+    ])
+      .then(([sessionData, defaultsData]) => {
+        if (sessionData.error) throw new Error(sessionData.error);
+        setSession(sessionData);
+        setDefaults(defaultsData);
       })
       .catch((err: any) => setError(err.message || 'Failed to load session'))
       .finally(() => setLoading(false));
   }, []);
 
-  return { session, error, loading };
+  return { session, defaults, error, loading };
 }
 
 function App() {
-  const { session, error, loading } = useSessionRecord();
+  const { session, defaults, error, loading } = useSessionRecord();
 
   const sections = useMemo(() => {
     if (!session) return [];
@@ -74,8 +82,13 @@ function App() {
         ),
       },
       {
-        id: 'system-prompt',
-        title: 'System Prompt',
+        id: 'operational-prompt',
+        title: 'Operational Base Prompt',
+        content: <pre className="inspector-pre">{defaults?.operational_prompt || ''}</pre>,
+      },
+      {
+        id: 'project-prompt',
+        title: 'Project Prompt',
         content: <pre className="inspector-pre">{session.system_prompt || ''}</pre>,
       },
       {
