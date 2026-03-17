@@ -65,11 +65,21 @@ async function loadSessions() {
 
 async function selectSession(id: string) {
   const { sessionsMap } = useStore.getState();
-  set({ currentSession: id, currentSessionSlug: sessionsMap[id]?.slug || id, view: { type: 'participant', tab: 'transcript' } });
+  set({
+    currentSession: id,
+    currentSessionSlug: sessionsMap[id]?.slug || id,
+    currentParticipant: null,
+    transcript: [],
+    analysis: null,
+    view: { type: 'participant', tab: 'transcript' },
+  });
   const list = await fetch(`${API}/api/sessions/${id}/participants`).then(r => r.json());
   const participants: Record<string, any> = {};
   list.forEach((p: any) => { participants[p.id] = p; });
   set({ participants });
+  if (list.length > 0) {
+    await selectParticipant(list[0].id);
+  }
   connectSSE(id);
   try {
     const data = await fetch(`${API}/api/sessions/${id}/synthesis`).then(r => r.json());

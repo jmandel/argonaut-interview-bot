@@ -113,6 +113,24 @@ export function getDefaultFormConfig() {
   };
 }
 
+function formatFullFormConfig(formConfig: unknown): string {
+  try {
+    return JSON.stringify(formConfig, null, 2);
+  } catch {
+    return String(formConfig ?? "");
+  }
+}
+
+function formatSelectedArchetypeContext(
+  roleLabel: string,
+  roleDescription: string,
+): string {
+  return [
+    `Role: ${roleLabel}`,
+    roleDescription ? `Description: ${roleDescription}` : '',
+  ].filter(Boolean).join("\n\n");
+}
+
 export function getOperationalBasePrompt(): string {
   return `Operational syntax:
 
@@ -143,8 +161,11 @@ Use the participant's name and organization when it helps make the conversation 
 **Role:** {{ROLE_LABEL}}
 **Description:** {{ROLE_DESCRIPTION}}
 
-### Interview Notes for This Archetype
-{{INTERVIEW_NOTES}}
+### Full Form Config
+{{FULL_FORM_CONFIG}}
+
+### Selected Archetype Detail
+{{SELECTED_ARCHETYPE_CONTEXT}}
 
 ## Background Knowledge
 You know this domain deeply. The participant may or may not. Use this project background to ask informed questions and to introduce the topic gradually when needed.
@@ -260,6 +281,7 @@ export function buildSystemPromptFromTemplate(
   template: string,
   participantName: string,
   participantOrganization: string,
+  formConfig: unknown,
   roleLabel: string,
   roleDescription: string,
   interviewNotes: string,
@@ -269,16 +291,15 @@ export function buildSystemPromptFromTemplate(
   const turnStatus = buildTurnStatus(turnCount, activeMinutes);
   const safeParticipantName = participantName?.trim() || "(not provided)";
   const safeParticipantOrganization = participantOrganization?.trim() || "(not provided)";
+  const fullFormConfig = formatFullFormConfig(formConfig);
+  const selectedArchetypeContext = formatSelectedArchetypeContext(roleLabel, roleDescription);
   const operationalPrompt = getOperationalBasePrompt()
-    .replace(/\{\{PARTICIPANT_NAME\}\}/g, safeParticipantName)
-    .replace(/\{\{PARTICIPANT_ORGANIZATION\}\}/g, safeParticipantOrganization)
-    .replace(/\{\{ROLE_LABEL\}\}/g, roleLabel)
-    .replace(/\{\{ROLE_DESCRIPTION\}\}/g, roleDescription)
-    .replace(/\{\{INTERVIEW_NOTES\}\}/g, interviewNotes)
     .replace(/\{\{TURN_STATUS\}\}/g, turnStatus);
   const projectPrompt = template
     .replace(/\{\{PARTICIPANT_NAME\}\}/g, safeParticipantName)
     .replace(/\{\{PARTICIPANT_ORGANIZATION\}\}/g, safeParticipantOrganization)
+    .replace(/\{\{FULL_FORM_CONFIG\}\}/g, fullFormConfig)
+    .replace(/\{\{SELECTED_ARCHETYPE_CONTEXT\}\}/g, selectedArchetypeContext)
     .replace(/\{\{ROLE_LABEL\}\}/g, roleLabel)
     .replace(/\{\{ROLE_DESCRIPTION\}\}/g, roleDescription)
     .replace(/\{\{INTERVIEW_NOTES\}\}/g, interviewNotes)
@@ -299,6 +320,7 @@ export function buildSystemPrompt(archetype: string, turnCount?: number, customR
     getDefaultSystemPrompt(),
     "(not provided)",
     "(not provided)",
+    getDefaultFormConfig(),
     roleLabel,
     roleDescription,
     a.interviewNotes,
@@ -309,50 +331,37 @@ export function buildSystemPrompt(archetype: string, turnCount?: number, customR
 
 export const EXTRACTION_PROMPT = `You are a qualitative research analyst reviewing an interview transcript from a discovery exercise about SMART Permission Tickets — a proposed standard for portable authorization in healthcare data access.
 
-Write a thorough but highly usable analysis memo. Your job is to capture the FULL texture of what was said — not just conclusions, but reasoning, hesitations, tensions, contradictions, and implications. A separate synthesis step will compare across multiple interviews, so completeness matters far more than brevity. Do not pre-filter for "importance" — include everything substantive.
+Write a sharp, concise research memo that is easy to scan and tightly grounded in the transcript. Do not write a sprawling essay.
 
-Use clear section headers and a readable structure. Favor compact analytical bullets and short paragraphs over long walls of prose.
+Use this exact structure:
 
-Return the memo in exactly this structure:
+## Core Read
+2-4 sentences on the participant's overall stance and what most shaped their perspective.
 
-## Summary
-3-5 sentences summarizing the participant's overall stance, core concerns, and how they approached the conversation.
+## Top Takeaways
+3-5 bullets only. Each bullet should capture one important point the participant clearly expressed, with brief evidence or a quote.
 
-## Key Positions
-Bullet list of the participant's major positions, each with:
-- the position itself
-- the reasoning behind it
-- any tension, caveat, or condition they attached
+## Requirements and Concerns
+Bullets covering the concrete requirements, failure modes, tradeoffs, or non-negotiables they raised.
 
-## Requirements, Tradeoffs, and Non-Negotiables
-Bullet list capturing:
-- what they said the system must do
-- what they said it should avoid
-- tradeoffs they were willing to make
-- things they treated as non-negotiable
+## Tensions or Open Questions
+Bullets on contradictions, ambiguities, or unresolved questions. Only include points actually supported by the interview.
 
-## How Their Role Shaped Their View
-Short paragraph or bullets on how their organizational role, incentives, workflow, or institutional position seemed to shape their answers.
+## Best Quotes
+3-6 short bullets with the most revealing direct quotes.
 
-## Tensions, Contradictions, or Blind Spots
-Bullet list of internal tensions, unresolved contradictions, unexamined assumptions, or perspectives they did not fully engage.
-
-## Notable Quotes
-Bullet list of the most revealing direct quotes, especially moments of candor, uncertainty, frustration, conviction, or sharp tradeoff language.
-
-## Chronological Notes
-Short bullet list walking through the conversation arc: what opened things up, where they shifted, where they pushed back, and where the most revealing moments happened.
-
-## Analyst Bottom Line
-3-5 sentences on their core stance, biggest risk they see, non-negotiables, and whether they would likely be an obstacle, skeptic, or ally in a real standards process.
+## Bottom Line
+2-3 sentences on what this means for the project and whether the participant sounds like an ally, skeptic, or blocker.
 
 Guidelines:
-- Quote the participant directly and extensively — their words ARE the data.
-- Be structured and skimmable. Use bullets freely when they improve usability.
-- Do not editorialize or judge — describe what you observed.
-- If the conversation was cut short or the participant disengaged, say so explicitly and analyze what you do have.
-- Err on the side of including too much rather than too little. This is raw material for cross-participant synthesis.
-- Avoid JSON or rigid key-value extraction formats. This should read like a strong research memo, not a machine export.`;
+- Stay tightly grounded in what the participant actually said.
+- Keep it concise and high-signal. Do not repeat the same point across multiple sections.
+- Prefer 3 strong points over 10 weak ones.
+- If the interview is thin, the memo should be thin. Do not inflate weak evidence into strong conclusions.
+- Use inference sparingly and label it as inference.
+- Quote the participant directly where it adds clarity.
+- Do not editorialize.
+- Do not output JSON, tables, or long narrative prose.`;
 
 export const SYNTHESIS_PROMPT = `You are synthesizing full interview transcripts from multiple participants in a discovery exercise about SMART Permission Tickets (portable authorization for healthcare data).
 

@@ -220,6 +220,7 @@ app.post("/api/chat", async (c) => {
     sessionConfig.system_prompt,
     participant.name,
     participant.organization || "",
+    sessionConfig.form_config,
     roleLabel,
     roleDescription,
     interviewNotes,
@@ -271,6 +272,9 @@ app.post("/api/chat", async (c) => {
           [participant.id]
         );
         notifyDashboard("participant_status", { id: participant.id, status: "completed" });
+
+        // Generate the final per-conversation analysis once the interview is complete.
+        runFullExtraction(participant.id).catch(console.error);
       }
 
       await stream.writeSSE({ data: JSON.stringify({ type: "done", complete: interviewComplete }) });
@@ -281,8 +285,6 @@ app.post("/api/chat", async (c) => {
         preview: cleanResponse.slice(0, 200),
       });
 
-      // Async: evolving full analysis memo
-      runFullExtraction(participant.id).catch(console.error);
     } catch (err: any) {
       console.error("Chat error:", err);
       await stream.writeSSE({
@@ -333,6 +335,7 @@ app.post("/api/chat/start", async (c) => {
     startConfig.system_prompt,
     participant.name,
     participant.organization || "",
+    startConfig.form_config,
     startRoleLabel,
     startRoleDesc,
     startNotes
