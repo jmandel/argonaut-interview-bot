@@ -1,0 +1,15 @@
+[Unit]
+Description=Argonaut Interview Bot
+After=network.target
+
+[Service]
+Type=simple
+User=exedev
+WorkingDirectory=/home/exedev/argonaut-interview-bot
+EnvironmentFile=/home/exedev/argonaut-interview-bot/.env
+ExecStart=/home/exedev/.bun/bin/bun run src/index.ts
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

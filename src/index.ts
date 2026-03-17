@@ -760,6 +760,7 @@ async function runFullExtraction(participantId: string) {
 // ─── Static files via Bun HTML imports ───
 import homepage from "../public/index.html";
 import dashboard from "../public/dashboard.html";
+import sessionInfo from "../public/session-info.html";
 
 // ─── Start ───
 const port = parseInt(process.env.PORT || "3000");
@@ -774,6 +775,7 @@ export default {
     "/session/*": homepage,
     "/dashboard": dashboard,
     "/dashboard.html": dashboard,
+    "/session-info": sessionInfo,
   },
   fetch: app.fetch,
   development: {

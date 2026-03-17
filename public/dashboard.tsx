@@ -103,6 +103,17 @@ async function runSynthesis() {
   }
 }
 
+async function inspectSessionDetails() {
+  const { currentSession } = useStore.getState();
+  if (!currentSession) return;
+
+  try {
+    window.open(`/session-info?session=${encodeURIComponent(currentSession)}`, '_blank');
+  } catch (err: any) {
+    alert('Failed to load session details: ' + (err.message || 'Unknown error'));
+  }
+}
+
 let evtSource: EventSource | null = null;
 function connectSSE(sessionId: string) {
   evtSource?.close();
@@ -182,6 +193,9 @@ function Header() {
           <option value="">Select session...</option>
           {sessions.map(s => <option key={s.id} value={s.id}>{s.name} ({s.status})</option>)}
         </select>
+        <button className="btn btn-outline" disabled={!currentSession} onClick={inspectSessionDetails}>
+          Info
+        </button>
         <button className="btn" disabled={!currentSession || synthesizing} onClick={runSynthesis}>
           {synthesizing ? 'Synthesizing...' : 'Run Synthesis'}
         </button>
