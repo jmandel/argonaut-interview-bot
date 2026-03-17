@@ -1,0 +1,604 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SMART Permission Tickets — Discovery Exercise</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --surface: #f8f9fa;
+    --surface2: #e9ecef;
+    --border: #dee2e6;
+    --text: #212529;
+    --text-muted: #6c757d;
+    --accent: #0d6efd;
+    --accent-hover: #0b5ed7;
+    --user-bg: #e7f1ff;
+    --assistant-bg: #f8f9fa;
+    --danger: #dc3545;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1a1d21;
+      --surface: #212529;
+      --surface2: #2b3035;
+      --border: #495057;
+      --text: #e9ecef;
+      --text-muted: #adb5bd;
+      --accent: #6ea8fe;
+      --accent-hover: #3d8bfd;
+      --user-bg: #1a3152;
+      --assistant-bg: #212529;
+      --danger: #ea868f;
+    }
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .container {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: 1.5rem 1rem;
+    width: 100%;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+  }
+
+  h1 { font-size: 1.5rem; font-weight: 600; }
+  h2 { font-size: 1.25rem; font-weight: 600; }
+
+  .form-group { margin-bottom: 1rem; }
+
+  label {
+    display: block;
+    font-size: 0.875rem;
+    color: var(--text-muted);
+    margin-bottom: 0.375rem;
+    font-weight: 500;
+  }
+
+  input, select {
+    width: 100%;
+    padding: 0.5rem 0.75rem;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 0.375rem;
+    color: var(--text);
+    font-size: 0.9375rem;
+    outline: none;
+    transition: border-color 0.15s, box-shadow 0.15s;
+  }
+
+  input:focus, select:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(13, 110, 253, 0.15);
+  }
+
+  select option { background: var(--bg); }
+
+  .btn {
+    padding: 0.5rem 1.25rem;
+    background: var(--accent);
+    color: white;
+    border: none;
+    border-radius: 0.375rem;
+    font-size: 0.9375rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.15s;
+    width: 100%;
+  }
+
+  .btn:hover { background: var(--accent-hover); }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; background: var(--text-muted); }
+
+  .btn-sm {
+    font-size: 0.8125rem;
+    padding: 0.375rem 0.75rem;
+    width: auto;
+  }
+
+  .btn-danger {
+    background: transparent;
+    border: 1px solid var(--danger);
+    color: var(--danger);
+  }
+
+  .btn-danger:hover { background: var(--danger); color: white; }
+
+  /* ─── Welcome / Join ─── */
+  #join-screen {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 1rem;
+  }
+
+  .welcome-header {
+    margin-bottom: 0.25rem;
+  }
+
+  .welcome-intro {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 0.5rem;
+    padding: 1rem 1.25rem;
+    font-size: 0.875rem;
+    line-height: 1.7;
+    color: var(--text-muted);
+  }
+
+  .welcome-intro strong { color: var(--text); }
+
+  .archetype-desc {
+    font-size: 0.8125rem;
+    color: var(--text-muted);
+    margin-top: 0.375rem;
+    min-height: 1.25em;
+  }
+
+  .role-tiles {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.5rem;
+    margin-top: 0.25rem;
+  }
+
+  .role-tile {
+    padding: 0.625rem 0.75rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 0.375rem;
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+    text-align: left;
+  }
+
+  .role-tile:hover {
+    border-color: var(--accent);
+  }
+
+  .role-tile.selected {
+    border-color: var(--accent);
+    background: var(--user-bg);
+    box-shadow: 0 0 0 2px rgba(13, 110, 253, 0.15);
+  }
+
+  .role-tile-label {
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--text);
+    line-height: 1.3;
+  }
+
+  .role-tile-desc {
+    font-size: 0.6875rem;
+    color: var(--text-muted);
+    line-height: 1.4;
+    margin-top: 0.25rem;
+  }
+
+  .custom-role-input {
+    width: 100%;
+    margin-top: 0.5rem;
+    padding: 0.375rem 0.5rem;
+    border: 1px solid var(--border);
+    border-radius: 0.375rem;
+    font-size: 0.8125rem;
+    background: var(--bg);
+    color: var(--text);
+  }
+
+  .custom-role-input:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px rgba(13, 110, 253, 0.15);
+  }
+
+  /* ─── Options (MCQ buttons) ─── */
+  .options {
+    display: flex;
+    flex-direction: column;
+    gap: 0.375rem;
+    margin-top: 0.25rem;
+    align-self: flex-start;
+  }
+
+  .option-btn {
+    text-align: left;
+    padding: 0.5rem 0.75rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 0.375rem;
+    color: var(--text);
+    font-size: 0.875rem;
+    line-height: 1.4;
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+  }
+
+  .option-btn:hover {
+    border-color: var(--accent);
+    background: var(--user-bg);
+  }
+
+  .option-btn .option-letter {
+    color: var(--accent);
+    font-weight: 600;
+    margin-right: 0.375rem;
+  }
+
+  .option-btn.selected {
+    border-color: var(--accent);
+    background: var(--user-bg);
+  }
+
+  .option-btn:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+
+  .options-submit {
+    margin-top: 0.375rem;
+    padding: 0.5rem 1rem;
+    background: var(--surface2);
+    color: var(--text-muted);
+    border: 1px solid var(--border);
+    border-radius: 0.375rem;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
+    display: block;
+    opacity: 0.4;
+    pointer-events: none;
+  }
+
+  .options-submit.visible {
+    opacity: 1;
+    pointer-events: auto;
+    background: var(--accent);
+    color: white;
+    border-color: var(--accent);
+  }
+
+  .options-submit.visible:hover { background: var(--accent-hover); }
+  .options-submit:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  /* ─── Chat ─── */
+  #chat-screen { display: none; flex: 1; flex-direction: column; }
+
+  .chat-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-bottom: 0.75rem;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 0.75rem;
+  }
+
+  .chat-header-info h2 { font-size: 1rem; font-weight: 600; }
+  .chat-header-info span { font-size: 0.75rem; color: var(--text-muted); }
+
+  .messages {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    padding-bottom: 1rem;
+  }
+
+  .message {
+    padding: 0.75rem 1rem;
+    border-radius: 0.75rem;
+    line-height: 1.55;
+    font-size: 0.9375rem;
+    word-wrap: break-word;
+  }
+
+  .message.assistant {
+    background: var(--assistant-bg);
+    border: 1px solid var(--border);
+    align-self: flex-start;
+    border-radius: 0.75rem 0.75rem 0.75rem 0.25rem;
+  }
+
+  .message.user {
+    background: var(--accent);
+    color: white;
+    align-self: flex-end;
+    max-width: 80%;
+    border-radius: 0.75rem 0.75rem 0.25rem 0.75rem;
+  }
+
+  .message.streaming { border-color: var(--accent); }
+
+  .typing-indicator {
+    display: flex;
+    gap: 0.3rem;
+    padding: 0.25rem 0;
+  }
+
+  .typing-indicator span {
+    width: 0.4rem;
+    height: 0.4rem;
+    background: var(--text-muted);
+    border-radius: 50%;
+    animation: typing 1.2s infinite;
+  }
+
+  .typing-indicator span:nth-child(2) { animation-delay: 0.2s; }
+  .typing-indicator span:nth-child(3) { animation-delay: 0.4s; }
+
+  @keyframes typing {
+    0%, 60%, 100% { opacity: 0.3; transform: scale(1); }
+    30% { opacity: 1; transform: scale(1.2); }
+  }
+
+  .input-area {
+    display: flex;
+    align-items: flex-end;
+    gap: 0.5rem;
+    padding-top: 0.75rem;
+    border-top: 1px solid var(--border);
+  }
+
+  .input-area textarea {
+    flex: 1;
+    padding: 0.5rem 0.75rem;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 0.375rem;
+    color: var(--text);
+    font-size: 0.9375rem;
+    font-family: inherit;
+    resize: none;
+    outline: none;
+    height: 4rem;
+    overflow-y: auto;
+  }
+
+  .input-area textarea:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(13, 110, 253, 0.15);
+  }
+
+  .input-area .btn {
+    width: auto;
+    flex-shrink: 0;
+    height: 2.5rem;
+    padding: 0 1rem;
+  }
+
+  /* ─── Complete ─── */
+  #complete-screen {
+    display: none;
+    flex: 1;
+    justify-content: center;
+    align-items: center;
+    text-align: center;
+  }
+
+  #complete-screen h2 { margin-bottom: 0.75rem; }
+  #complete-screen p { color: var(--text-muted); max-width: 28em; line-height: 1.6; }
+
+  .btn-icon {
+    padding: 0.5rem;
+    min-width: 2.5rem;
+    text-align: center;
+    font-size: 1.125rem;
+    line-height: 1;
+  }
+
+  .btn-done {
+    display: block;
+    width: 100%;
+    padding: 0.5rem;
+    margin-top: 0.5rem;
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 0.375rem;
+    color: var(--text-muted);
+    font-size: 0.8125rem;
+    cursor: pointer;
+    transition: border-color 0.15s, color 0.15s;
+  }
+
+  .btn-done:hover {
+    border-color: var(--accent);
+    color: var(--text);
+  }
+
+  .btn-secondary {
+    background: var(--surface2);
+  }
+
+  .btn-secondary:hover {
+    background: var(--border);
+  }
+
+  .mic-recording {
+    color: var(--danger) !important;
+    border-color: var(--danger) !important;
+    animation: pulse 1.5s infinite;
+  }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+  }
+
+  .final-thoughts {
+    padding: 0.75rem 0;
+  }
+
+  .final-thoughts p {
+    color: var(--text-muted);
+    font-size: 0.875rem;
+    margin-bottom: 0.5rem;
+  }
+
+  .final-thoughts textarea {
+    width: 100%;
+    padding: 0.5rem 0.75rem;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 0.375rem;
+    color: var(--text);
+    font-size: 0.9375rem;
+    font-family: inherit;
+    resize: none;
+    outline: none;
+  }
+
+  .final-thoughts textarea:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(13, 110, 253, 0.15);
+  }
+
+  .final-thoughts-actions {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 0.5rem;
+  }
+
+  .message p { margin: 0 0 0.5em; }
+  .message p:last-child { margin-bottom: 0; }
+  .message ul, .message ol { margin: 0.25em 0 0.5em 1.25em; }
+  .message strong { font-weight: 600; }
+  .message em { font-style: italic; }
+  .message h3 { font-size: 1rem; font-weight: 600; margin: 0.5em 0 0.25em; }
+  .message h4 { font-size: 0.9375rem; font-weight: 600; margin: 0.5em 0 0.25em; }
+  .message { white-space: normal; }
+
+  .options-hint {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    text-align: center;
+    padding-top: 0.25rem;
+  }
+
+  .option-btn { display: flex; align-items: flex-start; gap: 0.5rem; }
+  .option-btn p { margin: 0; display: inline; }
+  .option-btn strong { font-weight: 600; }
+
+  .option-indicator {
+    flex-shrink: 0;
+    width: 1rem;
+    height: 1rem;
+    margin-top: 0.1875rem;
+    border: 2px solid var(--text-muted);
+    display: inline-block;
+    transition: border-color 0.15s, background 0.15s;
+  }
+
+  .option-indicator.radio {
+    border-radius: 50%;
+  }
+
+  .option-indicator.checkbox {
+    border-radius: 0.1875rem;
+  }
+
+  .option-btn.selected .option-indicator.radio {
+    border-color: var(--accent);
+    background: radial-gradient(circle, var(--accent) 40%, transparent 45%);
+  }
+
+  .option-indicator.checkbox.checked {
+    border-color: var(--accent);
+    background: var(--accent);
+    position: relative;
+  }
+
+  .option-indicator.checkbox.checked::after {
+    content: '';
+    position: absolute;
+    left: 0.1875rem;
+    top: 0.0625rem;
+    width: 0.3125rem;
+    height: 0.5625rem;
+    border: solid white;
+    border-width: 0 2px 2px 0;
+    transform: rotate(45deg);
+  }
+
+  .join-header {
+    display: flex;
+    flex-direction: column;
+    gap: 0.125rem;
+  }
+
+  .session-badge {
+    color: var(--accent);
+    font-size: 0.875rem;
+    font-weight: 500;
+  }
+
+  .subtitle {
+    color: var(--text-muted);
+    font-size: 0.9375rem;
+  }
+
+  .done-area {
+    padding-top: 0.5rem;
+  }
+
+  .done-area .btn {
+    width: 100%;
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    font-size: 0.8125rem;
+    padding: 0.5rem 1rem;
+  }
+
+  .done-area .btn:hover {
+    color: var(--text);
+    border-color: var(--accent);
+    background: transparent;
+  }
+
+  .chat-org {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+  }
+
+  .mic-btn {
+    height: 2.5rem;
+    width: 2.5rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 0.375rem;
+    color: var(--text);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: border-color 0.15s;
+    flex-shrink: 0;
+    padding: 0;
+  }
+
+  .mic-btn:hover { border-color: var(--accent); }
+</style>
+</head>
+<body>
+<div class="container">
+  <div id="root"></div>
+</div>
+<script type="module" src="./app.tsx"></script>
+</body>
+</html>
