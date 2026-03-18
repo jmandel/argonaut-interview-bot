@@ -481,6 +481,7 @@ function MicButton({ onTranscript, inputRef }: { onTranscript: (text: string) =>
   const [recording, setRecording] = useState(false);
   const recRef = useRef<any>(null);
   const consumedRef = useRef(0);
+  const wantRecordingRef = useRef(false);
 
   useEffect(() => {
     micResetConsumed = () => { consumedRef.current = recRef.current?._resultCount ?? 0; };
@@ -489,8 +490,60 @@ function MicButton({ onTranscript, inputRef }: { onTranscript: (text: string) =>
 
   if (!SR) return null;
 
+  const startRec = () => {
+    const rec = new SR();
+    rec.continuous = true;
+    rec.interimResults = true;
+    rec.lang = 'en-US';
+    consumedRef.current = 0;
+
+    rec.onresult = (e: any) => {
+      rec._resultCount = e.results.length;
+      let finalText = '';
+      let interimText = '';
+      for (let i = consumedRef.current; i < e.results.length; i++) {
+        const transcript = e.results[i][0].transcript;
+        if (e.results[i].isFinal) {
+          finalText += transcript;
+        } else {
+          interimText += transcript;
+        }
+      }
+      onTranscript(finalText + interimText);
+    };
+
+    rec.onerror = (e: any) => {
+      if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
+        console.error('SpeechRecognition error:', e.error);
+        wantRecordingRef.current = false;
+        setRecording(false);
+        recRef.current = null;
+      }
+      // Other errors (network, no-speech) — let onend handle restart
+    };
+
+    rec.onend = () => {
+      recRef.current = null;
+      if (wantRecordingRef.current) {
+        // Browser killed recognition (silence timeout, etc.) — auto-restart
+        try {
+          startRec();
+        } catch {
+          wantRecordingRef.current = false;
+          setRecording(false);
+        }
+      } else {
+        setRecording(false);
+      }
+    };
+
+    rec.start();
+    recRef.current = rec;
+  };
+
   const toggle = async () => {
     if (recording) {
+      wantRecordingRef.current = false;
       recRef.current?.stop();
       recRef.current = null;
       setRecording(false);
@@ -498,44 +551,13 @@ function MicButton({ onTranscript, inputRef }: { onTranscript: (text: string) =>
     }
 
     try {
-      const rec = new SR();
-      rec.continuous = true;
-      rec.interimResults = true;
-      rec.lang = 'en-US';
-      consumedRef.current = 0;
-
-      rec.onresult = (e: any) => {
-        rec._resultCount = e.results.length;
-        let finalText = '';
-        let interimText = '';
-        for (let i = consumedRef.current; i < e.results.length; i++) {
-          const transcript = e.results[i][0].transcript;
-          if (e.results[i].isFinal) {
-            finalText += transcript;
-          } else {
-            interimText += transcript;
-          }
-        }
-        onTranscript(finalText + interimText);
-      };
-
-      rec.onerror = (e: any) => {
-        console.error('SpeechRecognition error:', e.error, e.message);
-        setRecording(false);
-        recRef.current = null;
-      };
-
-      rec.onend = () => {
-        setRecording(false);
-        recRef.current = null;
-      };
-
-      rec.start();
-      recRef.current = rec;
+      wantRecordingRef.current = true;
+      startRec();
       setRecording(true);
       inputRef.current?.focus();
     } catch (err) {
       console.error('Failed to start speech recognition:', err);
+      wantRecordingRef.current = false;
       setRecording(false);
     }
   };
@@ -694,6 +716,12 @@ function ChatScreen() {
           <h2>{roleDisplay}</h2>
           <span className="chat-org">{nameDisplay}</span>
         </div>
+        <a
+          href={`${API}/api/prompt/${useStore.getState().token}`}
+          target="_blank"
+          rel="noopener"
+          style={{ fontSize: '0.7rem', color: 'var(--text-muted)', textDecoration: 'underline', marginLeft: 'auto', padding: '0.25rem 0.5rem' }}
+        >View prompt</a>
       </div>
       <ChatMessages />
       {!showFinal ? (

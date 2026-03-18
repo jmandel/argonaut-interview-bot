@@ -428,6 +428,35 @@ app.get("/api/participants/by-token/:token", (c) => {
   return c.json(row);
 });
 
+// View system prompt for a participant
+app.get("/api/prompt/:token", (c) => {
+  const participant = db
+    .query("SELECT p.*, s.name as session_name FROM participants p JOIN sessions s ON p.session_id = s.id WHERE p.token = ?")
+    .get(c.req.param("token")) as any;
+  if (!participant) return c.text("Not found", 404);
+
+  const sessionConfig = loadSessionConfig(participant.session_id);
+  const archetypeInfo = sessionConfig.form_config.archetypes?.find((a: any) => a.key === participant.archetype);
+  const roleLabel = participant.archetype === 'custom' && participant.custom_role
+    ? participant.custom_role
+    : (archetypeInfo?.label || participant.archetype);
+  const roleDescription = participant.archetype === 'custom' && participant.custom_role
+    ? `Self-described role: "${participant.custom_role}".`
+    : (archetypeInfo?.description || '');
+  const interviewNotes = archetypeInfo?.interviewNotes || '';
+  const systemPrompt = buildSystemPromptFromTemplate(
+    sessionConfig.system_prompt,
+    participant.name,
+    participant.organization || "",
+    sessionConfig.form_config,
+    roleLabel,
+    roleDescription,
+    interviewNotes,
+  );
+
+  return c.text(systemPrompt, 200, { "Content-Type": "text/plain; charset=utf-8" });
+});
+
 // Download transcript as markdown
 app.get("/api/transcript/:token", (c) => {
   const participant = db
