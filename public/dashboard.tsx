@@ -7,13 +7,18 @@ marked.setOptions({ breaks: true, gfm: true });
 function md(text: string): string { return marked.parse(text) as string; }
 
 const API = '';
-const ARCH_LABELS: Record<string, string> = {
-  ehr_data_holder: 'EHR/Data Holder', patient_app_developer: 'App Developer',
-  identity_service: 'Identity Service', public_health: 'Public Health',
-  care_coordination_cbo: 'CBO', privacy_governance: 'Privacy/Governance',
-  patient_self: 'Patient', caregiver_representative: 'Caregiver/Rep',
-};
-function archLabel(key: string) { return ARCH_LABELS[key] || key; }
+
+function buildArchetypeLabels(formConfig: any): Record<string, string> {
+  const labels: Record<string, string> = {};
+  for (const archetype of formConfig?.archetypes || []) {
+    if (archetype?.key && archetype?.label) labels[archetype.key] = archetype.label;
+  }
+  return labels;
+}
+
+function getArchetypeLabel(labels: Record<string, string>, key: string) {
+  return labels[key] || key;
+}
 
 function openInTab(text: string, title: string) {
   const blob = new Blob([text], { type: 'text/plain' });
@@ -34,6 +39,7 @@ interface DashState {
   sessionsMap: Record<string, any>;
   currentSession: string | null;
   currentSessionSlug: string | null;
+  archetypeLabels: Record<string, string>;
   participants: Record<string, any>;
   currentParticipant: string | null;
   transcript: any[];
@@ -47,6 +53,7 @@ interface DashState {
 const useStore = create<DashState>(() => ({
   sessions: [], sessionsMap: {},
   currentSession: null, currentSessionSlug: null,
+  archetypeLabels: {},
   participants: {}, currentParticipant: null,
   transcript: [], analysis: null,
   synthesis: null, synthesisStreamText: null, synthesizing: false,
@@ -68,15 +75,22 @@ async function selectSession(id: string) {
   set({
     currentSession: id,
     currentSessionSlug: sessionsMap[id]?.slug || id,
+    archetypeLabels: {},
     currentParticipant: null,
     transcript: [],
     analysis: null,
     view: { type: 'participant', tab: 'transcript' },
   });
-  const list = await fetch(`${API}/api/sessions/${id}/participants`).then(r => r.json());
+  const [list, config] = await Promise.all([
+    fetch(`${API}/api/sessions/${id}/participants`).then(r => r.json()),
+    fetch(`${API}/api/sessions/${id}/config`).then(r => r.json()).catch(() => null),
+  ]);
   const participants: Record<string, any> = {};
   list.forEach((p: any) => { participants[p.id] = p; });
-  set({ participants });
+  set({
+    participants,
+    archetypeLabels: config?.form_config ? buildArchetypeLabels(config.form_config) : {},
+  });
   if (list.length > 0) {
     await selectParticipant(list[0].id);
   }
@@ -231,6 +245,7 @@ function ShareUrl() {
 }
 
 function Sidebar() {
+  const archetypeLabels = useStore(s => s.archetypeLabels);
   const participants = useStore(s => s.participants);
   const currentParticipant = useStore(s => s.currentParticipant);
   const view = useStore(s => s.view);
@@ -265,7 +280,7 @@ function Sidebar() {
               <div key={p.id} className={`participant-card ${currentParticipant === p.id ? 'active' : ''} ${dimmed ? 'dimmed' : ''}`}
                 onClick={() => selectParticipant(p.id)}>
                 <div className="name"><span className={`status-dot ${statusClass}`} />{p.name}</div>
-                <div className="meta">{p.organization} · {archLabel(p.archetype)}</div>
+                <div className="meta">{p.organization} · {getArchetypeLabel(archetypeLabels, p.archetype)}</div>
               </div>
             );
           })
@@ -462,6 +477,7 @@ function CopyButton({ label, getText }: { label: string; getText: () => Promise<
 }
 
 function SynthesisView() {
+  const archetypeLabels = useStore(s => s.archetypeLabels);
   const synthesis = useStore(s => s.synthesis);
   const streamText = useStore(s => s.synthesisStreamText);
   const synthesizing = useStore(s => s.synthesizing);
@@ -524,7 +540,7 @@ function SynthesisView() {
               <div className="conflict-positions">
                 {c.positions?.map((p: any, j: number) => (
                   <div key={j} className="pos">
-                    <div className="arch">{archLabel(p.archetype)}</div>
+                    <div className="arch">{getArchetypeLabel(archetypeLabels, p.archetype)}</div>
                     <div>{p.stance}</div>
                     {p.quote && <div className="quote">"{p.quote}"</div>}
                   </div>
@@ -551,8 +567,8 @@ function SynthesisView() {
           {synthesis.contested_requirements.map((r: any, i: number) => (
             <div key={i} className="requirement-card">
               <div className="req-text">{r.requirement}</div>
-              <div className="req-meta"><strong>For:</strong> {r.for?.archetypes?.map(archLabel).join(', ') || '?'} — {r.for?.core_argument || ''}</div>
-              <div className="req-meta"><strong>Against:</strong> {r.against?.archetypes?.map(archLabel).join(', ') || '?'} — {r.against?.core_argument || ''}</div>
+              <div className="req-meta"><strong>For:</strong> {r.for?.archetypes?.map((key: string) => getArchetypeLabel(archetypeLabels, key)).join(', ') || '?'} — {r.for?.core_argument || ''}</div>
+              <div className="req-meta"><strong>Against:</strong> {r.against?.archetypes?.map((key: string) => getArchetypeLabel(archetypeLabels, key)).join(', ') || '?'} — {r.against?.core_argument || ''}</div>
               {r.discussion_framing && <div className="req-meta" style={{ color: 'var(--orange)' }}><strong>Discussion:</strong> {r.discussion_framing}</div>}
             </div>
           ))}
