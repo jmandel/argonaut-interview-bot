@@ -36,6 +36,7 @@ interface AppState {
   sessionName: string;
   roleDisplay: string;
   nameDisplay: string;
+  ttsEnabled: boolean;
 }
 
 const useStore = create<AppState>(() => ({
@@ -56,9 +57,41 @@ const useStore = create<AppState>(() => ({
   sessionName: '',
   roleDisplay: '',
   nameDisplay: '',
+  ttsEnabled: false,
 }));
 
 const set = useStore.setState;
+
+// ─── TTS ───
+function speakText(text: string) {
+  if (!window.speechSynthesis) return;
+  // Strip markdown formatting for cleaner speech
+  const clean = text
+    .replace(/\*\*(.+?)\*\*/g, '$1')
+    .replace(/\*(.+?)\*/g, '$1')
+    .replace(/^#+\s+/gm, '')
+    .replace(/\[([A-Z])\]\s+/g, '')  // strip option markers
+    .replace(/\[\[(single|multi)\]\]/g, '')
+    .replace(/\n/g, ' ');
+  window.speechSynthesis.cancel();
+  const utterance = new SpeechSynthesisUtterance(clean);
+  utterance.rate = 1.05;
+  // Prefer a natural-sounding voice
+  const voices = window.speechSynthesis.getVoices();
+  const preferred = voices.find(v => /samantha|karen|daniel|zira|aria|jenny/i.test(v.name) && v.lang.startsWith('en'))
+    || voices.find(v => v.lang.startsWith('en') && v.name.toLowerCase().includes('natural'))
+    || voices.find(v => v.lang.startsWith('en') && !v.name.toLowerCase().includes('espeak'));
+  if (preferred) utterance.voice = preferred;
+  window.speechSynthesis.speak(utterance);
+}
+
+function stopSpeaking() {
+  window.speechSynthesis?.cancel();
+}
+
+function maybeSpeakAssistant(text: string) {
+  if (useStore.getState().ttsEnabled) speakText(text);
+}
 
 // ─── Option Parsing ───
 function parseOptions(text: string): ParsedOptions {
@@ -238,6 +271,7 @@ async function startInterview(token: string) {
     streamingContent: '',
     isStreaming: false,
   }));
+  maybeSpeakAssistant(result.text);
   if (result.complete) set({ screen: 'complete' });
 }
 
@@ -263,6 +297,7 @@ async function resumeInterview(token: string) {
       streamingContent: '',
       isStreaming: false,
     }));
+    maybeSpeakAssistant(result.text);
     if (result.complete) set({ screen: 'complete' });
   }
 }
@@ -298,6 +333,7 @@ async function sendMessage(text: string) {
       isStreaming: false,
       sending: false,
     }));
+    maybeSpeakAssistant(result.text);
     if (result.complete) set({ screen: 'complete' });
   } catch (err: any) {
     set(s => ({
@@ -479,6 +515,7 @@ function ChatInput() {
         onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
       />
       <MicButton onUpdate={handleMicUpdate} inputRef={ref} />
+      <SpeakerButton />
       <button className="btn" onClick={handleSend} disabled={sending || !text.trim()}>Send</button>
     </div>
   );
@@ -568,6 +605,29 @@ function MicButton({ onUpdate, inputRef }: { onUpdate: (final: string, interim: 
       title={recording ? 'Stop dictation' : 'Dictate'}>
       <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
         <path d="M12 14a3 3 0 003-3V5a3 3 0 10-6 0v6a3 3 0 003 3zm5-3a5 5 0 01-10 0H5a7 7 0 0014 0h-2zm-4 8.93A7.001 7.001 0 0012 20a7.001 7.001 0 00-1-.07V22h2v-2.07z"/>
+      </svg>
+    </button>
+  );
+}
+
+function SpeakerButton() {
+  const enabled = useStore(s => s.ttsEnabled);
+  if (!window.speechSynthesis) return null;
+  return (
+    <button
+      className={`mic-btn ${enabled ? 'speaker-active' : ''}`}
+      onClick={() => {
+        const next = !enabled;
+        set({ ttsEnabled: next });
+        if (!next) stopSpeaking();
+      }}
+      title={enabled ? 'Stop reading messages aloud' : 'Read messages aloud'}>
+      <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+        {enabled ? (
+          <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3A4.5 4.5 0 0014 8.5v7a4.47 4.47 0 002.5-3.5zM14 3.23v2.06a6.51 6.51 0 010 13.42v2.06A8.51 8.51 0 0014 3.23z"/>
+        ) : (
+          <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3A4.5 4.5 0 0014 8.5v7a4.47 4.47 0 002.5-3.5zM16.5 12l2.5-2.5 1.41 1.41L18.41 12l2 2.09-1.41 1.41L16.5 13l-2.5 2.5-1.41-1.41L14.59 12l-2-2.09 1.41-1.41L16.5 11z"/>
+        )}
       </svg>
     </button>
   );
