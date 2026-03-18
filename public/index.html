@@ -14,9 +14,12 @@
     --text-muted: #6c757d;
     --accent: #0d6efd;
     --accent-hover: #0b5ed7;
+    --accent-bg: #0d6efd;
+    --accent-ring: rgba(13, 110, 253, 0.15);
     --user-bg: #e7f1ff;
     --assistant-bg: #f8f9fa;
     --danger: #dc3545;
+    --danger-hover-bg: #dc3545;
   }
 
   @media (prefers-color-scheme: dark) {
@@ -29,9 +32,12 @@
       --text-muted: #adb5bd;
       --accent: #6ea8fe;
       --accent-hover: #3d8bfd;
+      --accent-bg: #2563eb;
+      --accent-ring: rgba(110, 168, 254, 0.2);
       --user-bg: #1a3152;
       --assistant-bg: #212529;
       --danger: #ea868f;
+      --danger-hover-bg: #b02a37;
     }
   }
 
@@ -95,14 +101,14 @@
 
   input:focus, select:focus {
     border-color: var(--accent);
-    box-shadow: 0 0 0 3px rgba(13, 110, 253, 0.15);
+    box-shadow: 0 0 0 3px var(--accent-ring);
   }
 
   select option { background: var(--bg); }
 
   .btn {
     padding: 0.5rem 1.25rem;
-    background: var(--accent);
+    background: var(--accent-bg);
     color: white;
     border: none;
     border-radius: 0.375rem;
@@ -128,7 +134,7 @@
     color: var(--danger);
   }
 
-  .btn-danger:hover { background: var(--danger); color: white; }
+  .btn-danger:hover { background: var(--danger-hover-bg); color: white; }
 
   /* ─── Welcome / Join ─── */
   #join-screen {
@@ -186,7 +192,7 @@
   .role-tile.selected {
     border-color: var(--accent);
     background: var(--user-bg);
-    box-shadow: 0 0 0 2px rgba(13, 110, 253, 0.15);
+    box-shadow: 0 0 0 2px var(--accent-ring);
   }
 
   .role-tile-label {
@@ -217,7 +223,7 @@
   .custom-role-input:focus {
     outline: none;
     border-color: var(--accent);
-    box-shadow: 0 0 0 2px rgba(13, 110, 253, 0.15);
+    box-shadow: 0 0 0 2px var(--accent-ring);
   }
 
   /* ─── Options (MCQ buttons) ─── */
@@ -261,6 +267,7 @@
   .option-btn:disabled {
     opacity: 0.5;
     cursor: default;
+    pointer-events: none;
   }
 
   .options-submit {
@@ -282,9 +289,9 @@
   .options-submit.visible {
     opacity: 1;
     pointer-events: auto;
-    background: var(--accent);
+    background: var(--accent-bg);
     color: white;
-    border-color: var(--accent);
+    border-color: var(--accent-bg);
   }
 
   .options-submit.visible:hover { background: var(--accent-hover); }
@@ -333,7 +340,7 @@
   }
 
   .message.user {
-    background: var(--accent);
+    background: var(--accent-bg);
     color: white;
     align-self: flex-end;
     max-width: 80%;
@@ -397,7 +404,7 @@
 
   .input-area textarea:focus {
     border-color: var(--accent);
-    box-shadow: 0 0 0 3px rgba(13, 110, 253, 0.15);
+    box-shadow: 0 0 0 3px var(--accent-ring);
   }
 
   .input-area .btn {
@@ -435,7 +442,7 @@
   }
 
   .send-btn:disabled {
-    background: color-mix(in srgb, var(--accent) 55%, var(--bg));
+    background: color-mix(in srgb, var(--accent-bg) 55%, var(--bg));
     color: color-mix(in srgb, white 88%, transparent);
     opacity: 1;
   }
@@ -504,7 +511,7 @@
 
   .final-thoughts textarea:focus {
     border-color: var(--accent);
-    box-shadow: 0 0 0 3px rgba(13, 110, 253, 0.15);
+    box-shadow: 0 0 0 3px var(--accent-ring);
   }
 
   .final-thoughts-actions {
