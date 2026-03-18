@@ -1024,20 +1024,33 @@ function JoinScreen() {
       <div className="form-group">
         <label>Which best describes your role?</label>
         <div className="role-tiles">
-          {archList.map((a: any) => (
+          {archList.map((a: any) => a.key === 'custom' ? (
+            <div key={a.key}
+              className={`role-tile role-tile-custom ${arch === a.key ? 'selected' : ''}`}
+              role="button"
+              tabIndex={0}
+              onClick={() => { setArch(a.key); }}
+              onKeyDown={e => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  setArch(a.key);
+                }
+              }}>
+              <div className="role-tile-label">{a.label}</div>
+              <textarea className="custom-role-input"
+                placeholder="Not listed above? Describe your role here..."
+                value={customRole}
+                rows={3}
+                onClick={e => e.stopPropagation()}
+                onFocus={() => setArch('custom')}
+                onChange={e => { setCustomRole(e.target.value); setArch('custom'); }} />
+            </div>
+          ) : (
             <button key={a.key} type="button"
               className={`role-tile ${arch === a.key ? 'selected' : ''}`}
               onClick={() => { setArch(a.key); }}>
               <div className="role-tile-label">{a.label}</div>
-              {a.key === 'custom' ? (
-                <input type="text" className="custom-role-input"
-                  placeholder="Not listed above? Describe your role here..."
-                  value={customRole}
-                  onClick={e => e.stopPropagation()}
-                  onChange={e => { setCustomRole(e.target.value); setArch('custom'); }} />
-              ) : (
-                <div className="role-tile-desc">{a.description}</div>
-              )}
+              <div className="role-tile-desc">{a.description}</div>
             </button>
           ))}
         </div>

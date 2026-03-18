@@ -300,7 +300,10 @@ function Sidebar() {
   const synthesis = useStore(s => s.synthesis);
   const synthesizing = useStore(s => s.synthesizing);
   const currentSession = useStore(s => s.currentSession);
-  const pList = Object.values(participants) as any[];
+  const pList = (Object.values(participants) as any[]).sort((a, b) => {
+    if (Boolean(a.archived) !== Boolean(b.archived)) return a.archived ? 1 : -1;
+    return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+  });
   const [pendingArchiveId, setPendingArchiveId] = useState<string | null>(null);
 
   if (!currentSession) return null;
