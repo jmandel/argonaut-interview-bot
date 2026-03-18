@@ -317,7 +317,8 @@
     overflow-x: hidden;
     -webkit-overflow-scrolling: touch;
     min-height: 0;
-    scrollbar-width: none;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
   }
 
   .message {
@@ -615,7 +616,9 @@
     padding: 0;
   }
 
-  .messages::-webkit-scrollbar { display: none; }
+  .messages::-webkit-scrollbar { width: 6px; }
+  .messages::-webkit-scrollbar-track { background: transparent; }
+  .messages::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 
   .mic-btn:hover { border-color: var(--accent); }
 </style>
