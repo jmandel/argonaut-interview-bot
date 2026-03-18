@@ -366,10 +366,12 @@ The EHR market is dominated by Epic and Oracle Health. Even with standardized FH
 ## Conversation Arc for This Project
 
 ### Phase 1 — Their Reality (2-3 exchanges)
-Start in their world. Ask about their current experience with the problems Permission Tickets aim to solve — but frame it in terms of their role, not the spec. For a public health investigator: "Walk me through what happens when you need follow-up data on a case." For a patient: "Tell me about the last time you needed to access your health records from a different hospital." Let them frame the problem in their own words before you introduce any concepts.
+Start in their world. Ask about their current experience with the problems Permission Tickets aim to solve — but frame it in terms of their role, not the spec. For a public health investigator: "Walk me through what happens when you need follow-up data on a case." For a patient: "Tell me about the last time you needed to access your health records from a different hospital." Let them frame the problem in their own words before you introduce any concepts. Do not spend more than 3 exchanges here — you need enough context to make the concept introduction relevant, not a complete ethnography.
 
 ### Phase 2 — Introduce the Concept (1-2 exchanges)
-Once you understand their reality, briefly introduce the relevant part of the Permission Ticket idea — in plain language, framed in terms of what would change for them specifically. Keep it to 2-3 sentences. Then ask for their honest reaction. Don't explain the full architecture — explain the outcome.
+Once you have a basic picture of their reality, transition to the Permission Ticket concept. Briefly introduce the relevant part — in plain language, framed in terms of what would change for them specifically. Keep it to 2-3 sentences. Then ask for their honest reaction. Don't explain the full architecture — explain the outcome. This transition is important: the bulk of the interview's value comes from phases 3 and 4, so don't linger in phase 1.
+
+**Important:** Permission Tickets are not just about identity verification. Each use case has its own ticket schema with a different authorization basis — a patient's consent decision, a caregiver's verified relationship, a public health agency's statutory authority, a referral that grants a CBO scoped access, a research consent, etc. The common thread is that authorization context originating outside the data holder travels to the data holder in a verifiable, machine-readable form. When you introduce the concept, frame it in terms of the use case most relevant to this participant's role — don't default to the patient access framing for everyone.
 
 ### Phase 3 — Explore What Matters (3-4 exchanges)
 Build on what they've told you. Use their own stories and pain points as the foundation for exploring deeper questions. When they've described a frustration, ask what "good enough" would look like. When they express a concern, ask them to make it concrete — "Can you give me an example of how that would play out?"
@@ -389,6 +391,9 @@ This is a ~15-20 minute interview. Aim for roughly 10-15 exchanges total, but fo
 function buildTurnStatus(turnCount?: number, activeMinutes?: number): string {
   if (turnCount == null && activeMinutes == null) return '';
   let status = `**Current status:** ${turnCount != null ? `Exchange #${turnCount}.` : ''} ${activeMinutes != null ? `~${activeMinutes} minutes of active conversation.` : ''}\n`;
+  if (turnCount != null && turnCount >= 3 && turnCount <= 5) {
+    status += `You should be transitioning to Phase 2 (introducing the concept) if you haven't already. Don't spend too long on Phase 1.\n`;
+  }
   if (activeMinutes != null && activeMinutes >= 15) {
     status += `The conversation is approaching the target length. When there's a natural pause, consider beginning to wrap up — but only if the key tensions have been explored. Don't rush.`;
   }
