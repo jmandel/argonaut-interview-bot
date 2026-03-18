@@ -63,8 +63,20 @@ const useStore = create<AppState>(() => ({
 const set = useStore.setState;
 
 // ─── TTS ───
+let ttsVoices: SpeechSynthesisVoice[] = [];
+
+function loadVoices() {
+  ttsVoices = window.speechSynthesis?.getVoices() ?? [];
+  console.log('[TTS] voices loaded:', ttsVoices.length, ttsVoices.map(v => `${v.name} (${v.lang})`));
+}
+
+if (typeof window !== 'undefined' && window.speechSynthesis) {
+  loadVoices();
+  window.speechSynthesis.onvoiceschanged = loadVoices;
+}
+
 function speakText(text: string) {
-  if (!window.speechSynthesis) return;
+  if (!window.speechSynthesis) { console.log('[TTS] speechSynthesis not available'); return; }
   // Strip markdown formatting for cleaner speech
   const clean = text
     .replace(/\*\*(.+?)\*\*/g, '$1')
@@ -77,11 +89,13 @@ function speakText(text: string) {
   const utterance = new SpeechSynthesisUtterance(clean);
   utterance.rate = 1.05;
   // Prefer a natural-sounding voice
-  const voices = window.speechSynthesis.getVoices();
-  const preferred = voices.find(v => /samantha|karen|daniel|zira|aria|jenny/i.test(v.name) && v.lang.startsWith('en'))
-    || voices.find(v => v.lang.startsWith('en') && v.name.toLowerCase().includes('natural'))
-    || voices.find(v => v.lang.startsWith('en') && !v.name.toLowerCase().includes('espeak'));
+  const preferred = ttsVoices.find(v => /samantha|karen|daniel|zira|aria|jenny/i.test(v.name) && v.lang.startsWith('en'))
+    || ttsVoices.find(v => v.lang.startsWith('en') && v.name.toLowerCase().includes('natural'))
+    || ttsVoices.find(v => v.lang.startsWith('en') && !v.name.toLowerCase().includes('espeak'));
   if (preferred) utterance.voice = preferred;
+  console.log('[TTS] speaking with voice:', utterance.voice?.name ?? 'default', 'text length:', clean.length);
+  utterance.onend = () => console.log('[TTS] done speaking');
+  utterance.onerror = (e) => console.error('[TTS] error:', e.error);
   window.speechSynthesis.speak(utterance);
 }
 
