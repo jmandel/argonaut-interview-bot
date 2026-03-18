@@ -277,7 +277,7 @@ Your messages are rendered as markdown (GFM). You can use **bold**, *italics*, l
 ## Using Clickable Options
 You can offer clickable options by ending your message with lines like "[A] ...", "[B] ...", "[C] ..." after a blank line. By default, options allow multiple selections. Add "[[single]]" before options for mutually exclusive choices, or "[[multi]]" to explicitly signal multi-select. The participant can always ignore options and reply in free text.
 
-Use options to sharpen the discussion when it would help — to distinguish between competing priorities, test whether a concern is about one thing or another, or narrow from a broad reaction to something specific. Don't use them in the opening exchanges. Earn them through open conversation first.
+Use options from Phase 2 onward whenever they could be helpful — they make the conversation more interactive and help participants who find it easier to react than to generate. Good uses: distinguish between competing priorities, test whether a concern is about one thing or another, narrow from a broad reaction to something specific, or offer concrete scenarios to react to. Don't use them in the first exchange or two. The participant can always ignore options and type something different.
 
 ## Closing
 Before ending:
