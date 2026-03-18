@@ -409,7 +409,7 @@ const shouldTail = { current: true };
 // Track user scroll on the window — if they scroll up, stop tailing; if they scroll back to bottom, resume
 if (typeof window !== 'undefined') {
   window.addEventListener('scroll', () => {
-    const atBottom = (window.innerHeight + window.scrollY) >= (document.body.scrollHeight - 60);
+    const atBottom = (window.innerHeight + window.scrollY) >= (document.body.scrollHeight - 200);
     shouldTail.current = atBottom;
   }, { passive: true });
 }
