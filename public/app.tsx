@@ -36,7 +36,6 @@ interface AppState {
   sessionName: string;
   roleDisplay: string;
   nameDisplay: string;
-  ttsEnabled: boolean;
 }
 
 const useStore = create<AppState>(() => ({
@@ -57,55 +56,10 @@ const useStore = create<AppState>(() => ({
   sessionName: '',
   roleDisplay: '',
   nameDisplay: '',
-  ttsEnabled: false,
 }));
 
 const set = useStore.setState;
 
-// ─── TTS ───
-let ttsVoices: SpeechSynthesisVoice[] = [];
-
-function loadVoices() {
-  ttsVoices = window.speechSynthesis?.getVoices() ?? [];
-  console.log('[TTS] voices loaded:', ttsVoices.length, ttsVoices.map(v => `${v.name} (${v.lang})`));
-}
-
-if (typeof window !== 'undefined' && window.speechSynthesis) {
-  loadVoices();
-  window.speechSynthesis.onvoiceschanged = loadVoices;
-}
-
-function speakText(text: string) {
-  if (!window.speechSynthesis) { console.log('[TTS] speechSynthesis not available'); return; }
-  // Strip markdown formatting for cleaner speech
-  const clean = text
-    .replace(/\*\*(.+?)\*\*/g, '$1')
-    .replace(/\*(.+?)\*/g, '$1')
-    .replace(/^#+\s+/gm, '')
-    .replace(/\[([A-Z])\]\s+/g, '')  // strip option markers
-    .replace(/\[\[(single|multi)\]\]/g, '')
-    .replace(/\n/g, ' ');
-  window.speechSynthesis.cancel();
-  const utterance = new SpeechSynthesisUtterance(clean);
-  utterance.rate = 1.05;
-  // Prefer a natural-sounding voice
-  const preferred = ttsVoices.find(v => /samantha|karen|daniel|zira|aria|jenny/i.test(v.name) && v.lang.startsWith('en'))
-    || ttsVoices.find(v => v.lang.startsWith('en') && v.name.toLowerCase().includes('natural'))
-    || ttsVoices.find(v => v.lang.startsWith('en') && !v.name.toLowerCase().includes('espeak'));
-  if (preferred) utterance.voice = preferred;
-  console.log('[TTS] speaking with voice:', utterance.voice?.name ?? 'default', 'text length:', clean.length);
-  utterance.onend = () => console.log('[TTS] done speaking');
-  utterance.onerror = (e) => console.error('[TTS] error:', e.error);
-  window.speechSynthesis.speak(utterance);
-}
-
-function stopSpeaking() {
-  window.speechSynthesis?.cancel();
-}
-
-function maybeSpeakAssistant(text: string) {
-  if (useStore.getState().ttsEnabled) speakText(text);
-}
 
 // ─── Option Parsing ───
 function parseOptions(text: string): ParsedOptions {
@@ -311,7 +265,7 @@ async function resumeInterview(token: string) {
       streamingContent: '',
       isStreaming: false,
     }));
-    maybeSpeakAssistant(result.text);
+
     if (result.complete) set({ screen: 'complete' });
   }
 }
@@ -347,7 +301,7 @@ async function sendMessage(text: string) {
       isStreaming: false,
       sending: false,
     }));
-    maybeSpeakAssistant(result.text);
+
     if (result.complete) set({ screen: 'complete' });
   } catch (err: any) {
     set(s => ({
@@ -592,7 +546,7 @@ function ChatInput() {
         onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
       />
       <MicButton onUpdate={handleMicUpdate} inputRef={ref} />
-      <SpeakerButton />
+
       <button className="btn btn-icon send-btn" onClick={handleSend} disabled={sending || !text.trim()} aria-label="Send message" title="Send message">↑</button>
     </div>
   );
@@ -687,35 +641,6 @@ function MicButton({ onUpdate, inputRef }: { onUpdate: (final: string, interim: 
   );
 }
 
-function SpeakerButton() {
-  const enabled = useStore(s => s.ttsEnabled);
-  if (!window.speechSynthesis) return null;
-  return (
-    <button
-      className={`mic-btn ${enabled ? 'speaker-active' : ''}`}
-      onClick={() => {
-        const next = !enabled;
-        set({ ttsEnabled: next });
-        if (next) {
-          // Read the last assistant message as a test
-          const msgs = useStore.getState().messages;
-          const last = [...msgs].reverse().find(m => m.role === 'assistant');
-          if (last) speakText(last.content);
-        } else {
-          stopSpeaking();
-        }
-      }}
-      title={enabled ? 'Stop reading messages aloud' : 'Read messages aloud'}>
-      <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
-        {enabled ? (
-          <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3A4.5 4.5 0 0014 8.5v7a4.47 4.47 0 002.5-3.5zM14 3.23v2.06a6.51 6.51 0 010 13.42v2.06A8.51 8.51 0 0014 3.23z"/>
-        ) : (
-          <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3A4.5 4.5 0 0014 8.5v7a4.47 4.47 0 002.5-3.5zM16.5 12l2.5-2.5 1.41 1.41L18.41 12l2 2.09-1.41 1.41L16.5 13l-2.5 2.5-1.41-1.41L14.59 12l-2-2.09 1.41-1.41L16.5 11z"/>
-        )}
-      </svg>
-    </button>
-  );
-}
 
 function JoinScreen() {
   const archetypes = useStore(s => s.archetypes);
