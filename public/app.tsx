@@ -446,18 +446,27 @@ function ChatInput() {
   const [text, setText] = useState('');
   const sending = useStore(s => s.sending);
   const ref = useRef<HTMLTextAreaElement>(null);
-
   useEffect(() => {
     if (ref.current) {
       ref.current.scrollTop = ref.current.scrollHeight;
     }
   }, [text]);
 
+  const handleMicFinal = useCallback((final: string) => {
+    // Insert finalized speech at cursor position, like typing
+    const ta = ref.current;
+    if (ta) {
+      const start = ta.selectionStart;
+      setText(prev => prev.slice(0, start) + final + prev.slice(start));
+    } else {
+      setText(prev => prev + final);
+    }
+  }, []);
+
   const handleSend = useCallback(() => {
     const val = text.trim();
     if (!val || sending) return;
     setText('');
-    micResetConsumed?.();
     sendMessage(val);
     ref.current?.focus();
   }, [text, sending]);
@@ -468,48 +477,34 @@ function ChatInput() {
         onChange={e => setText(e.target.value)}
         onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
       />
-      <MicButton onTranscript={t => setText(t)} inputRef={ref} />
+      <MicButton onFinal={handleMicFinal} inputRef={ref} />
       <button className="btn" onClick={handleSend} disabled={sending || !text.trim()}>Send</button>
     </div>
   );
 }
 
-let micResetConsumed: (() => void) | null = null;
-
-function MicButton({ onTranscript, inputRef }: { onTranscript: (text: string) => void; inputRef: React.RefObject<HTMLTextAreaElement | null> }) {
+function MicButton({ onFinal, inputRef }: { onFinal: (text: string) => void; inputRef: React.RefObject<HTMLTextAreaElement | null> }) {
   const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
   const [recording, setRecording] = useState(false);
   const recRef = useRef<any>(null);
-  const consumedRef = useRef(0);
   const wantRecordingRef = useRef(false);
-
-  useEffect(() => {
-    micResetConsumed = () => { consumedRef.current = recRef.current?._resultCount ?? 0; };
-    return () => { micResetConsumed = null; };
-  }, []);
 
   if (!SR) return null;
 
   const startRec = () => {
     const rec = new SR();
     rec.continuous = true;
-    rec.interimResults = true;
+    rec.interimResults = false;
     rec.lang = 'en-US';
-    consumedRef.current = 0;
 
+    let processedCount = 0;
     rec.onresult = (e: any) => {
-      rec._resultCount = e.results.length;
-      let finalText = '';
-      let interimText = '';
-      for (let i = consumedRef.current; i < e.results.length; i++) {
-        const transcript = e.results[i][0].transcript;
+      for (let i = processedCount; i < e.results.length; i++) {
         if (e.results[i].isFinal) {
-          finalText += transcript;
-        } else {
-          interimText += transcript;
+          onFinal(e.results[i][0].transcript);
+          processedCount = i + 1;
         }
       }
-      onTranscript(finalText + interimText);
     };
 
     rec.onerror = (e: any) => {
