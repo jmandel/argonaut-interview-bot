@@ -406,32 +406,33 @@ function StreamingMessage() {
 
 const shouldTail = { current: true };
 
+// Track user scroll on the window — if they scroll up, stop tailing; if they scroll back to bottom, resume
+if (typeof window !== 'undefined') {
+  window.addEventListener('scroll', () => {
+    const atBottom = (window.innerHeight + window.scrollY) >= (document.body.scrollHeight - 60);
+    shouldTail.current = atBottom;
+  }, { passive: true });
+}
+
 function ChatMessages() {
   const messages = useStore(s => s.messages);
   const isStreaming = useStore(s => s.isStreaming);
   const sending = useStore(s => s.sending);
-  const messagesRef = useRef<HTMLDivElement>(null);
 
   // Resume tailing when user sends a message
   useEffect(() => {
     if (sending) shouldTail.current = true;
   }, [sending]);
 
-  // Scroll messages container to bottom when tailing
+  // Scroll window to bottom when tailing
   useEffect(() => {
-    if (shouldTail.current && messagesRef.current) {
-      messagesRef.current.scrollTop = messagesRef.current.scrollHeight;
+    if (shouldTail.current) {
+      window.scrollTo(0, document.body.scrollHeight);
     }
   });
 
-  const handleScroll = useCallback(() => {
-    if (!messagesRef.current) return;
-    const { scrollTop, scrollHeight, clientHeight } = messagesRef.current;
-    shouldTail.current = (scrollTop + clientHeight) >= (scrollHeight - 60);
-  }, []);
-
   return (
-    <div className="messages" ref={messagesRef} onScroll={handleScroll}>
+    <div className="messages">
       {messages.map((m, i) => (
         <MessageBubble key={i} msg={m} isLast={i === messages.length - 1 && !isStreaming} />
       ))}
