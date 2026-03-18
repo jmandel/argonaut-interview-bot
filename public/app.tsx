@@ -417,6 +417,7 @@ if (typeof window !== 'undefined') {
 function ChatMessages() {
   const messages = useStore(s => s.messages);
   const isStreaming = useStore(s => s.isStreaming);
+  const streamingContent = useStore(s => s.streamingContent);
   const sending = useStore(s => s.sending);
 
   // Resume tailing when user sends a message
@@ -429,7 +430,7 @@ function ChatMessages() {
     if (shouldTail.current) {
       window.scrollTo(0, document.body.scrollHeight);
     }
-  });
+  }, [messages, streamingContent]);
 
   return (
     <div className="messages">
