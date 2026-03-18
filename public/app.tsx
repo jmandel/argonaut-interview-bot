@@ -758,7 +758,7 @@ function JoinScreen() {
   );
 }
 
-function FinalThoughts() {
+function FinalThoughts({ onCancel }: { onCancel: () => void }) {
   const [text, setText] = useState('');
   return (
     <div className="final-thoughts">
@@ -768,6 +768,7 @@ function FinalThoughts() {
       <div className="final-thoughts-actions">
         <button className="btn btn-sm" onClick={() => finishInterview(text.trim() || null)}>Submit &amp; Finish</button>
         <button className="btn btn-sm btn-secondary" onClick={() => finishInterview(null)}>Skip &amp; Finish</button>
+        <button className="btn btn-sm btn-secondary" onClick={onCancel}>Never mind — keep going</button>
       </div>
     </div>
   );
@@ -803,7 +804,7 @@ function ChatScreen() {
           </div>
         </>
       ) : (
-        <FinalThoughts />
+        <FinalThoughts onCancel={() => setShowFinal(false)} />
       )}
     </div>
   );
