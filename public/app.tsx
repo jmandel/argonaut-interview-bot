@@ -418,12 +418,13 @@ function Options({ options, multi, onSelect }: {
           <span dangerouslySetInnerHTML={{ __html: mdInline(opt.text) }} />
         </button>
       ))}
-      {selected.size > 0 && (
-        <button className="options-submit visible" disabled={disabled}
-          onClick={() => { setDisabled(true); onSelect([...selected].join('; ')); }}>
-          Submit ({selected.size})
-        </button>
-      )}
+      <button
+        className={`options-submit ${selected.size > 0 ? 'visible' : ''}`}
+        disabled={disabled || selected.size === 0}
+        onClick={() => { setDisabled(true); onSelect([...selected].join('; ')); }}
+      >
+        {selected.size > 0 ? `Submit (${selected.size})` : 'Submit'}
+      </button>
       {hint}
     </div>
   );
@@ -456,30 +457,40 @@ function StreamingMessage() {
 
 const shouldTail = { current: true };
 
-// Track user scroll on the window — if they scroll up, stop tailing; if they scroll back to bottom, resume
-if (typeof window !== 'undefined') {
-  window.addEventListener('scroll', () => {
-    const atBottom = (window.innerHeight + window.scrollY) >= (document.body.scrollHeight - 200);
-    shouldTail.current = atBottom;
-  }, { passive: true });
-}
-
 function ChatMessages() {
   const messages = useStore(s => s.messages);
   const isStreaming = useStore(s => s.isStreaming);
   const streamingContent = useStore(s => s.streamingContent);
   const sending = useStore(s => s.sending);
 
+  useEffect(() => {
+    // Start at the bottom on initial load/resume.
+    shouldTail.current = true;
+    const snapToBottom = () => window.scrollTo({ top: document.body.scrollHeight, behavior: 'auto' });
+    requestAnimationFrame(() => {
+      snapToBottom();
+      requestAnimationFrame(snapToBottom);
+    });
+
+    const onScroll = () => {
+      const atBottom = (window.innerHeight + window.scrollY) >= (document.body.scrollHeight - 80);
+      shouldTail.current = atBottom;
+    };
+
+    window.addEventListener('scroll', onScroll, { passive: true });
+    onScroll();
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
+
   // Resume tailing when user sends a message
   useEffect(() => {
     if (sending) shouldTail.current = true;
   }, [sending]);
 
-  // Scroll window to bottom when tailing
+  // Scroll the page to bottom when tailing
   useEffect(() => {
-    if (shouldTail.current) {
-      window.scrollTo(0, document.body.scrollHeight);
-    }
+    if (!shouldTail.current) return;
+    window.scrollTo({ top: document.body.scrollHeight, behavior: 'auto' });
   }, [messages, streamingContent]);
 
   return (
@@ -495,18 +506,70 @@ function ChatMessages() {
 function ChatInput() {
   const [text, setText] = useState('');
   const sending = useStore(s => s.sending);
+  const rootRef = useRef<HTMLDivElement>(null);
   const ref = useRef<HTMLTextAreaElement>(null);
+  const interimLenRef = useRef(0);
+
   useEffect(() => {
     if (ref.current) {
       ref.current.scrollTop = ref.current.scrollHeight;
     }
   }, [text]);
 
-  const interimLenRef = useRef(0);
+  useEffect(() => {
+    const input = ref.current;
+    const root = rootRef.current;
+    const viewport = window.visualViewport;
+    if (!input || !root) return;
+    const baselineHeight = viewport?.height || window.innerHeight;
+    let rafId = 0;
+
+    const updateKeyboardInset = () => {
+      const active = document.activeElement === input;
+      if (!active) {
+        root.style.setProperty('--keyboard-offset', '0px');
+        return;
+      }
+
+      const viewportHeight = viewport?.height || window.innerHeight;
+      const viewportOffsetTop = viewport?.offsetTop || 0;
+      const heightLoss = Math.max(0, baselineHeight - viewportHeight);
+      const keyboardOffset = heightLoss > 120
+        ? Math.max(heightLoss - viewportOffsetTop, 0)
+        : 0;
+
+      root.style.setProperty('--keyboard-offset', `${keyboardOffset}px`);
+      cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(() => {
+        if (shouldTail.current) {
+          window.scrollTo({ top: document.body.scrollHeight, behavior: 'auto' });
+        } else {
+          const composerTop = root.getBoundingClientRect().top + window.scrollY;
+          const targetTop = Math.max(0, composerTop - window.innerHeight + root.offsetHeight + 16);
+          window.scrollTo({ top: targetTop, behavior: 'auto' });
+        }
+      });
+    };
+
+    const clearKeyboardInset = () => {
+      root.style.setProperty('--keyboard-offset', '0px');
+    };
+
+    input.addEventListener('focus', updateKeyboardInset);
+    input.addEventListener('blur', clearKeyboardInset);
+    viewport?.addEventListener('resize', updateKeyboardInset);
+
+    return () => {
+      cancelAnimationFrame(rafId);
+      input.removeEventListener('focus', updateKeyboardInset);
+      input.removeEventListener('blur', clearKeyboardInset);
+      viewport?.removeEventListener('resize', updateKeyboardInset);
+      root.style.setProperty('--keyboard-offset', '0px');
+    };
+  }, []);
 
   const handleMicUpdate = useCallback((final: string, interim: string) => {
     setText(prev => {
-      // Strip old interim suffix, append new final + interim
       const base = prev.slice(0, prev.length - interimLenRef.current);
       interimLenRef.current = interim.length;
       return base + final + interim;
@@ -523,14 +586,14 @@ function ChatInput() {
   }, [text, sending]);
 
   return (
-    <div className="input-area">
+    <div className="input-area" ref={rootRef}>
       <textarea ref={ref} value={text} placeholder="Type your response..."
         onChange={e => { interimLenRef.current = 0; setText(e.target.value); }}
         onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
       />
       <MicButton onUpdate={handleMicUpdate} inputRef={ref} />
       <SpeakerButton />
-      <button className="btn" onClick={handleSend} disabled={sending || !text.trim()}>Send</button>
+      <button className="btn btn-icon send-btn" onClick={handleSend} disabled={sending || !text.trim()} aria-label="Send message" title="Send message">↑</button>
     </div>
   );
 }

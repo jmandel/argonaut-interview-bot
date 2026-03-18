@@ -473,6 +473,57 @@
   .btn-link:hover {
     color: var(--accent-hover);
   }
+
+  @media (max-width: 800px) {
+    .header {
+      padding: 0.75rem 1rem;
+      align-items: flex-start;
+      flex-direction: column;
+      gap: 0.75rem;
+    }
+
+    .header-actions {
+      width: 100%;
+      flex-wrap: wrap;
+    }
+
+    .header-actions .btn,
+    .header-actions select {
+      flex: 1 1 100%;
+      width: 100%;
+    }
+
+    .layout {
+      grid-template-columns: 1fr;
+      min-height: auto;
+    }
+
+    .panel {
+      min-height: 0;
+    }
+
+    .panel-body {
+      padding: 0.75rem;
+    }
+
+    .tabs {
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    .tab {
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+
+    .conflict-positions {
+      flex-direction: column;
+    }
+
+    .create-session-form {
+      padding: 1rem;
+    }
+  }
 </style>
 </head>
 <body>
