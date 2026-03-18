@@ -239,7 +239,6 @@ async function startInterview(token: string) {
     streamingContent: '',
     isStreaming: false,
   }));
-  maybeSpeakAssistant(result.text);
   if (result.complete) set({ screen: 'complete' });
 }
 
