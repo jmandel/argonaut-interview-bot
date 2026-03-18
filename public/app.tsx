@@ -619,7 +619,14 @@ function SpeakerButton() {
       onClick={() => {
         const next = !enabled;
         set({ ttsEnabled: next });
-        if (!next) stopSpeaking();
+        if (next) {
+          // Read the last assistant message as a test
+          const msgs = useStore.getState().messages;
+          const last = [...msgs].reverse().find(m => m.role === 'assistant');
+          if (last) speakText(last.content);
+        } else {
+          stopSpeaking();
+        }
       }}
       title={enabled ? 'Stop reading messages aloud' : 'Read messages aloud'}>
       <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
