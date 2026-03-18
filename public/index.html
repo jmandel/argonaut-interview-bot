@@ -408,10 +408,8 @@
   }
 
   .input-area .btn {
-    width: auto;
     flex-shrink: 0;
     height: 2.5rem;
-    padding: 0 1rem;
   }
 
   /* ─── Complete ─── */
@@ -436,9 +434,12 @@
 
   .send-btn {
     padding: 0;
+    width: 2.5rem;
     min-width: 2.5rem;
-    font-size: 1rem;
-    font-weight: 600;
+    height: 2.5rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
   }
 
   .send-btn:disabled {
@@ -643,6 +644,21 @@
   }
 
   .mic-btn:hover { border-color: var(--accent); }
+
+  .app-footer {
+    text-align: center;
+    padding: 1.5rem 0 0.5rem;
+    font-size: 0.75rem;
+  }
+
+  .app-footer a {
+    color: var(--text-muted);
+    text-decoration: none;
+  }
+
+  .app-footer a:hover {
+    color: var(--accent);
+  }
 </style>
 </head>
 <body>
