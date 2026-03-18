@@ -412,17 +412,29 @@
     height: 2.5rem;
   }
 
-  /* ─── Complete ─── */
-  #complete-screen {
-    display: none;
-    flex: 1;
-    justify-content: center;
-    align-items: center;
-    text-align: center;
+  .completion-callout {
+    margin-top: 0.5rem;
+    padding: 1rem 1rem calc(1rem + env(safe-area-inset-bottom));
+    background: color-mix(in srgb, var(--assistant-bg) 82%, white);
+    border: 1px solid var(--border);
+    border-radius: 0.875rem;
   }
 
-  #complete-screen h2 { margin-bottom: 0.75rem; }
-  #complete-screen p { color: var(--text-muted); max-width: 28em; line-height: 1.6; }
+  .completion-callout h3 {
+    margin-bottom: 0.5rem;
+    font-size: 1rem;
+    font-weight: 600;
+  }
+
+  .completion-callout p {
+    color: var(--text-muted);
+    line-height: 1.6;
+    max-width: 36rem;
+  }
+
+  .completion-callout p + p {
+    margin-top: 0.625rem;
+  }
 
   .btn-icon {
     padding: 0.5rem;

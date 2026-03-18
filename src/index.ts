@@ -25,6 +25,7 @@ const app = new Hono();
 
 // SSE connections for dashboard updates
 const dashboardClients = new Set<ReadableStreamDefaultController>();
+const synthesisVersions = new Map<string, number>();
 
 function notifyDashboard(event: string, data: unknown) {
   const msg = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
@@ -35,6 +36,23 @@ function notifyDashboard(event: string, data: unknown) {
       dashboardClients.delete(ctrl);
     }
   }
+}
+
+function beginSynthesisVersion(sessionId: string) {
+  const next = (synthesisVersions.get(sessionId) || 0) + 1;
+  synthesisVersions.set(sessionId, next);
+  return next;
+}
+
+function invalidateSynthesis(sessionId: string, reason: string) {
+  const next = beginSynthesisVersion(sessionId);
+  db.run("DELETE FROM analyses WHERE session_id = ? AND analysis_type = 'synthesis'", [sessionId]);
+  notifyDashboard("synthesis_invalidated", { sessionId, reason });
+  return next;
+}
+
+function isCurrentSynthesisVersion(sessionId: string, version: number) {
+  return (synthesisVersions.get(sessionId) || 0) === version;
 }
 
 // ─── API Routes ───
@@ -128,6 +146,72 @@ function loadSessionConfig(sessionId: string) {
   };
 }
 
+const MIN_USER_TURNS = 3;
+const MIN_USER_WORDS = 50;
+
+function getUserWordCount(messages: { role: string; content: string }[]) {
+  return messages
+    .filter((m) => m.role === "user")
+    .reduce((sum, m) => sum + m.content.split(/\s+/).filter(Boolean).length, 0);
+}
+
+function getArchetypeLabel(formConfig: any, participant: any) {
+  const archetype = formConfig.form_config.archetypes?.find((a: any) => a.key === participant.archetype);
+  return archetype?.label || participant.archetype;
+}
+
+function loadAggregateParticipants(sessionId: string) {
+  const participants = db
+    .query("SELECT * FROM participants WHERE session_id = ? ORDER BY created_at")
+    .all(sessionId) as any[];
+  const sessionConfig = loadSessionConfig(sessionId);
+  const included: Array<{
+    participant: any;
+    messages: { role: string; content: string }[];
+    userTurns: number;
+    userWordCount: number;
+    archLabel: string;
+  }> = [];
+  const skippedArchived: string[] = [];
+  const skippedThreshold: string[] = [];
+  const skippedEmpty: string[] = [];
+
+  for (const participant of participants) {
+    const archived = Boolean(participant.archived);
+    if (archived) {
+      skippedArchived.push(participant.name);
+      continue;
+    }
+
+    const messages = db
+      .query("SELECT role, content FROM messages WHERE participant_id = ? ORDER BY id")
+      .all(participant.id) as { role: string; content: string }[];
+
+    if (messages.length === 0) {
+      skippedEmpty.push(participant.name);
+      continue;
+    }
+
+    const userTurns = messages.filter((m) => m.role === "user").length;
+    const userWordCount = getUserWordCount(messages);
+
+    if (userTurns < MIN_USER_TURNS && userWordCount < MIN_USER_WORDS) {
+      skippedThreshold.push(`${participant.name} (${userTurns} turns, ${userWordCount} words)`);
+      continue;
+    }
+
+    included.push({
+      participant: { ...participant, archived },
+      messages,
+      userTurns,
+      userWordCount,
+      archLabel: getArchetypeLabel(sessionConfig, participant),
+    });
+  }
+
+  return { included, skippedArchived, skippedThreshold, skippedEmpty };
+}
+
 // Participants
 app.post("/api/sessions/:sessionId/participants", async (c) => {
   const sessionId = resolveSessionId(c.req.param("sessionId")) || c.req.param("sessionId");
@@ -161,7 +245,7 @@ app.post("/api/sessions/:sessionId/participants", async (c) => {
 app.get("/api/sessions/:sessionId/participants", (c) => {
   const sessionId = resolveSessionId(c.req.param("sessionId")) || c.req.param("sessionId");
   const rows = db
-    .query(`SELECT p.id, p.name, p.organization, p.archetype, p.status, p.created_at, p.completed_at,
+    .query(`SELECT p.id, p.name, p.organization, p.archetype, p.status, p.archived, p.archived_at, p.created_at, p.completed_at,
       (SELECT COUNT(*) FROM messages m WHERE m.participant_id = p.id AND m.role = 'user') as user_turns,
       (SELECT MAX(m.created_at) FROM messages m WHERE m.participant_id = p.id) as last_message_at
     FROM participants p WHERE p.session_id = ? ORDER BY p.created_at`)
@@ -169,11 +253,43 @@ app.get("/api/sessions/:sessionId/participants", (c) => {
 
   for (const r of rows) {
     const userMsgs = db.query("SELECT content FROM messages WHERE participant_id = ? AND role = 'user'").all(r.id) as { content: string }[];
+    r.archived = Boolean(r.archived);
     r.user_words = userMsgs.reduce((sum, m) => sum + m.content.split(/\s+/).filter(Boolean).length, 0);
     r.meets_threshold = r.user_turns >= MIN_USER_TURNS || r.user_words >= MIN_USER_WORDS;
+    r.included_in_aggregates = !r.archived && r.meets_threshold;
   }
 
   return c.json(rows);
+});
+
+app.post("/api/participants/:id/archive", async (c) => {
+  const id = c.req.param("id");
+  const participant = db
+    .query("SELECT id, session_id, archived FROM participants WHERE id = ?")
+    .get(id) as any;
+
+  if (!participant) return c.json({ error: "Not found" }, 404);
+
+  const body: { archived?: boolean } = await c.req.json().catch(() => ({}));
+  if (typeof body.archived !== "boolean") {
+    return c.json({ error: "archived boolean required" }, 400);
+  }
+
+  const archived = body.archived;
+  if (Boolean(participant.archived) !== archived) {
+    db.run(
+      "UPDATE participants SET archived = ?, archived_at = CASE WHEN ? = 1 THEN datetime('now') ELSE NULL END WHERE id = ?",
+      [archived ? 1 : 0, archived ? 1 : 0, id]
+    );
+    notifyDashboard("participant_updated", { id, sessionId: participant.session_id, archived });
+    invalidateSynthesis(participant.session_id, "participant_archive_state_changed");
+  }
+
+  const updated = db
+    .query("SELECT id, session_id, archived, archived_at FROM participants WHERE id = ?")
+    .get(id) as any;
+  updated.archived = Boolean(updated.archived);
+  return c.json(updated);
 });
 
 // Chat - send message and stream response
@@ -497,27 +613,19 @@ app.get("/api/sessions/:sessionId/transcripts", (c) => {
   const session = db.query("SELECT * FROM sessions WHERE id = ?").get(sessionId) as any;
   if (!session) return c.json({ error: "Not found" }, 404);
 
-  const participants = db
-    .query("SELECT * FROM participants WHERE session_id = ? ORDER BY created_at")
-    .all(sessionId) as any[];
+  const { included, skippedArchived, skippedThreshold, skippedEmpty } = loadAggregateParticipants(sessionId);
+  let md = `# Interview Transcripts Included In Aggregates\n\n**Session:** ${session.name}\n**Exported:** ${new Date().toISOString()}\n**Participants Included:** ${included.length}\n`;
+  md += `**Excluded as archived:** ${skippedArchived.length}\n`;
+  md += `**Excluded as too short:** ${skippedThreshold.length}\n`;
+  md += `**Excluded with no messages:** ${skippedEmpty.length}\n\n`;
 
-  const allTranscriptsConfig = loadSessionConfig(sessionId);
-  let md = `# All Interview Transcripts\n\n**Session:** ${session.name}\n**Exported:** ${new Date().toISOString()}\n**Participants:** ${participants.length}\n\n`;
+  if (included.length === 0) {
+    md += `*No eligible interviews to export.*\n`;
+  }
 
-  for (const p of participants) {
-    const allArchetype = allTranscriptsConfig.form_config.archetypes?.find((a: any) => a.key === p.archetype);
-    const archLabel = allArchetype?.label || p.archetype;
+  for (const { participant: p, messages, archLabel } of included) {
     md += `---\n\n## ${p.name}${p.organization ? ` (${p.organization})` : ''}\n`;
     md += `**Role:** ${archLabel} | **Status:** ${p.status}\n\n`;
-
-    const messages = db
-      .query("SELECT role, content FROM messages WHERE participant_id = ? ORDER BY id")
-      .all(p.id) as { role: string; content: string }[];
-
-    if (messages.length === 0) {
-      md += `*No messages recorded.*\n\n`;
-      continue;
-    }
 
     for (const msg of messages) {
       const speaker = msg.role === 'assistant' ? 'Interviewer' : p.name;
@@ -563,40 +671,17 @@ app.post("/api/sessions/:sessionId/synthesize", async (c) => {
   return c.json({ status: "processing" });
 });
 
-const MIN_USER_TURNS = 3;
-const MIN_USER_WORDS = 50;
-
-function buildTranscriptsText(sessionId: string): { text: string; count: number; skipped: string[] } {
-  const participants = db
-    .query("SELECT * FROM participants WHERE session_id = ? ORDER BY created_at")
-    .all(sessionId) as any[];
-
-  const transcriptsConfig = loadSessionConfig(sessionId);
+function buildTranscriptsText(sessionId: string): {
+  text: string;
+  count: number;
+  skippedArchived: string[];
+  skippedThreshold: string[];
+  skippedEmpty: string[];
+} {
+  const { included, skippedArchived, skippedThreshold, skippedEmpty } = loadAggregateParticipants(sessionId);
   let transcriptsText = '';
-  let participantCount = 0;
-  const skipped: string[] = [];
 
-  for (const p of participants) {
-    const messages = db
-      .query("SELECT role, content FROM messages WHERE participant_id = ? ORDER BY id")
-      .all(p.id) as { role: string; content: string }[];
-
-    if (messages.length === 0) continue;
-
-    const userMessages = messages.filter(m => m.role === 'user');
-    const userWordCount = userMessages.reduce((sum, m) => sum + m.content.split(/\s+/).filter(Boolean).length, 0);
-
-    if (userMessages.length < MIN_USER_TURNS && userWordCount < MIN_USER_WORDS) {
-      const tArchetype = transcriptsConfig.form_config.archetypes?.find((a: any) => a.key === p.archetype);
-      skipped.push(`${p.name} (${userMessages.length} turns, ${userWordCount} words)`);
-      console.log(`Skipping ${p.name} from synthesis: ${userMessages.length} user turns, ${userWordCount} user words (min: ${MIN_USER_TURNS} turns OR ${MIN_USER_WORDS} words)`);
-      continue;
-    }
-
-    participantCount++;
-
-    const tArchetype = transcriptsConfig.form_config.archetypes?.find((a: any) => a.key === p.archetype);
-    const archLabel = tArchetype?.label || p.archetype;
+  for (const { participant: p, messages, archLabel } of included) {
     transcriptsText += `\n${'='.repeat(60)}\n`;
     transcriptsText += `## ${p.name}${p.organization ? ` (${p.organization})` : ''} — ${archLabel}\n`;
     transcriptsText += `Status: ${p.status}\n`;
@@ -606,24 +691,36 @@ function buildTranscriptsText(sessionId: string): { text: string; count: number;
       const speaker = msg.role === 'assistant' ? 'INTERVIEWER' : p.name.toUpperCase();
       transcriptsText += `${speaker}: ${msg.content}\n\n`;
     }
+
   }
 
-  return { text: transcriptsText, count: participantCount, skipped };
+  return { text: transcriptsText, count: included.length, skippedArchived, skippedThreshold, skippedEmpty };
 }
 
 async function runSynthesis(sessionId: string) {
-  const { text: transcriptsText, count: participantCount, skipped } = buildTranscriptsText(sessionId);
+  const synthesisVersion = beginSynthesisVersion(sessionId);
+  const { text: transcriptsText, count: participantCount, skippedArchived, skippedThreshold, skippedEmpty } = buildTranscriptsText(sessionId);
 
   if (participantCount === 0) {
-    const reason = skipped.length > 0
-      ? `No interviews met the minimum threshold (${MIN_USER_TURNS}+ turns OR ${MIN_USER_WORDS}+ words). Skipped: ${skipped.join(', ')}`
+    const details: string[] = [];
+    if (skippedArchived.length > 0) details.push(`archived: ${skippedArchived.join(", ")}`);
+    if (skippedThreshold.length > 0) details.push(`too short: ${skippedThreshold.join(", ")}`);
+    if (skippedEmpty.length > 0) details.push(`no messages: ${skippedEmpty.join(", ")}`);
+    const reason = details.length > 0
+      ? `No eligible interviews to synthesize (${MIN_USER_TURNS}+ turns OR ${MIN_USER_WORDS}+ words for non-archived interviews). Excluded: ${details.join(" | ")}`
       : "No interviews with messages to synthesize";
     notifyDashboard("synthesis_error", { sessionId, error: reason });
     return;
   }
 
-  if (skipped.length > 0) {
-    console.log(`Skipped ${skipped.length} participant(s) from synthesis: ${skipped.join(', ')}`);
+  if (skippedArchived.length > 0) {
+    console.log(`Excluded ${skippedArchived.length} archived participant(s) from synthesis: ${skippedArchived.join(", ")}`);
+  }
+  if (skippedThreshold.length > 0) {
+    console.log(`Skipped ${skippedThreshold.length} participant(s) from synthesis for insufficient content: ${skippedThreshold.join(", ")}`);
+  }
+  if (skippedEmpty.length > 0) {
+    console.log(`Skipped ${skippedEmpty.length} participant(s) from synthesis with no messages: ${skippedEmpty.join(", ")}`);
   }
   console.log(`Running synthesis across ${participantCount} participants from raw transcripts...`);
 
@@ -648,11 +745,20 @@ async function runSynthesis(sessionId: string) {
 
   let synthesisText = "";
   for await (const chunk of stream) {
+    if (!isCurrentSynthesisVersion(sessionId, synthesisVersion)) {
+      console.log(`Discarding stale synthesis stream for session ${sessionId}`);
+      return;
+    }
     const delta = chunk.choices[0]?.delta?.content || "";
     if (delta) {
       synthesisText += delta;
       notifyDashboard("synthesis_chunk", { sessionId, text: synthesisText });
     }
+  }
+
+  if (!isCurrentSynthesisVersion(sessionId, synthesisVersion)) {
+    console.log(`Discarding stale synthesis result for session ${sessionId}`);
+    return;
   }
 
   const jsonMatch = synthesisText.match(/\{[\s\S]*\}/);

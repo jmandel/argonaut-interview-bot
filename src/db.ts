@@ -25,6 +25,8 @@ db.exec(`
     custom_role TEXT DEFAULT '',
     token TEXT UNIQUE NOT NULL,
     status TEXT DEFAULT 'joined' CHECK(status IN ('joined','interviewing','completed')),
+    archived INTEGER DEFAULT 0 CHECK(archived IN (0,1)),
+    archived_at TEXT,
     created_at TEXT DEFAULT (datetime('now')),
     completed_at TEXT
   );
@@ -69,6 +71,19 @@ for (const col of [
     // Column already exists — ignore
   }
 }
+
+for (const col of [
+  "archived INTEGER DEFAULT 0",
+  "archived_at TEXT",
+]) {
+  try {
+    db.exec(`ALTER TABLE participants ADD COLUMN ${col}`);
+  } catch {
+    // Column already exists — ignore
+  }
+}
+
+db.exec("UPDATE participants SET archived = 0 WHERE archived IS NULL");
 
 // Backfill any sessions with empty config
 const emptySessions = db.query("SELECT id FROM sessions WHERE system_prompt = '' OR form_config = '{}'").all() as { id: string }[];

@@ -20,6 +20,35 @@ function getArchetypeLabel(labels: Record<string, string>, key: string) {
   return labels[key] || key;
 }
 
+function formatParticipantMeta(labels: Record<string, string>, participant: any) {
+  const parts: string[] = [];
+  if (participant.organization) parts.push(participant.organization);
+  parts.push(getArchetypeLabel(labels, participant.archetype));
+  return parts.join(' · ');
+}
+
+function mapParticipants(list: any[]) {
+  const participants: Record<string, any> = {};
+  list.forEach((participant) => {
+    participants[participant.id] = participant;
+  });
+  return participants;
+}
+
+function getDefaultParticipantId(list: any[]) {
+  return list.find((participant) => !participant.archived)?.id || list[0]?.id || null;
+}
+
+async function fetchParticipantsList(sessionId: string) {
+  return fetch(`${API}/api/sessions/${sessionId}/participants`).then((r) => r.json());
+}
+
+async function refreshParticipants(sessionId: string) {
+  const list = await fetchParticipantsList(sessionId);
+  set({ participants: mapParticipants(list) });
+  return list;
+}
+
 function openInTab(text: string, title: string) {
   const blob = new Blob([text], { type: 'text/plain' });
   const url = URL.createObjectURL(blob);
@@ -82,17 +111,16 @@ async function selectSession(id: string) {
     view: { type: 'participant', tab: 'transcript' },
   });
   const [list, config] = await Promise.all([
-    fetch(`${API}/api/sessions/${id}/participants`).then(r => r.json()),
+    fetchParticipantsList(id),
     fetch(`${API}/api/sessions/${id}/config`).then(r => r.json()).catch(() => null),
   ]);
-  const participants: Record<string, any> = {};
-  list.forEach((p: any) => { participants[p.id] = p; });
   set({
-    participants,
+    participants: mapParticipants(list),
     archetypeLabels: config?.form_config ? buildArchetypeLabels(config.form_config) : {},
   });
-  if (list.length > 0) {
-    await selectParticipant(list[0].id);
+  const defaultParticipantId = getDefaultParticipantId(list);
+  if (defaultParticipantId) {
+    await selectParticipant(defaultParticipantId);
   }
   connectSSE(id);
   try {
@@ -127,6 +155,23 @@ async function runSynthesis() {
   }
 }
 
+async function setParticipantArchived(id: string, archived: boolean) {
+  const response = await fetch(`${API}/api/participants/${id}/archive`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ archived }),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data.error || 'Failed to update participant archive state');
+  }
+  const { currentSession } = useStore.getState();
+  if (currentSession && currentSession === data.session_id) {
+    await refreshParticipants(currentSession);
+    set({ synthesis: null, synthesisStreamText: null, synthesizing: false });
+  }
+}
+
 async function inspectSessionDetails() {
   const { currentSession } = useStore.getState();
   if (!currentSession) return;
@@ -142,17 +187,10 @@ let evtSource: EventSource | null = null;
 function connectSSE(sessionId: string) {
   evtSource?.close();
   evtSource = new EventSource(`${API}/api/dashboard/events`);
-  const refreshParticipants = () => {
-    fetch(`${API}/api/sessions/${sessionId}/participants`).then(r => r.json()).then((list: any[]) => {
-      const participants: Record<string, any> = {};
-      list.forEach(p => { participants[p.id] = p; });
-      set({ participants });
-    });
-  };
   evtSource.addEventListener('participant_joined', (e: MessageEvent) => {
     const data = JSON.parse(e.data);
     if (data.sessionId !== sessionId) return;
-    refreshParticipants();
+    refreshParticipants(sessionId);
   });
   evtSource.addEventListener('participant_status', (e: MessageEvent) => {
     const data = JSON.parse(e.data);
@@ -161,9 +199,14 @@ function connectSSE(sessionId: string) {
       return { participants: { ...s.participants, [data.id]: { ...s.participants[data.id], status: data.status } } };
     });
   });
+  evtSource.addEventListener('participant_updated', (e: MessageEvent) => {
+    const data = JSON.parse(e.data);
+    if (data.sessionId !== sessionId) return;
+    refreshParticipants(sessionId);
+  });
   evtSource.addEventListener('new_message', (e: MessageEvent) => {
     const data = JSON.parse(e.data);
-    refreshParticipants();
+    refreshParticipants(sessionId);
     const { currentParticipant } = useStore.getState();
     if (data.participantId === currentParticipant) {
       fetch(`${API}/api/participants/${currentParticipant}/transcript`).then(r => r.json()).then(t => set({ transcript: t }));
@@ -196,6 +239,11 @@ function connectSSE(sessionId: string) {
     const data = JSON.parse(e.data);
     alert('Synthesis failed: ' + (data.error || 'Unknown error'));
     set({ synthesizing: false, synthesisStreamText: null });
+  });
+  evtSource.addEventListener('synthesis_invalidated', (e: MessageEvent) => {
+    const data = JSON.parse(e.data);
+    if (data.sessionId !== sessionId) return;
+    set({ synthesis: null, synthesisStreamText: null, synthesizing: false });
   });
 }
 
@@ -252,9 +300,13 @@ function Sidebar() {
   const synthesis = useStore(s => s.synthesis);
   const synthesizing = useStore(s => s.synthesizing);
   const currentSession = useStore(s => s.currentSession);
-  const pList = Object.values(participants);
+  const pList = Object.values(participants) as any[];
+  const [pendingArchiveId, setPendingArchiveId] = useState<string | null>(null);
 
   if (!currentSession) return null;
+
+  const archivedCount = pList.filter((participant) => participant.archived).length;
+  const eligibleCount = pList.filter((participant) => participant.included_in_aggregates).length;
 
   return (
     <div className="panel">
@@ -268,6 +320,9 @@ function Sidebar() {
           <div className="meta">{synthesizing ? 'Generating...' : synthesis ? 'View synthesis' : 'Not yet generated'}</div>
         </div>
         <div className="panel-header" style={{ marginTop: '0.75rem' }}>Participants</div>
+        <div className="participant-summary">
+          {eligibleCount} included in synthesis{archivedCount > 0 ? ` · ${archivedCount} archived` : ''}
+        </div>
         <ShareUrl />
         {pList.length === 0
           ? <div className="empty-state">No participants yet. Share the link above.</div>
@@ -276,11 +331,37 @@ function Sidebar() {
               (Date.now() - new Date(p.last_message_at + 'Z').getTime()) > 30 * 60 * 1000;
             const statusClass = stale ? 'stale' : p.status;
             const dimmed = !p.meets_threshold;
+            const archived = Boolean(p.archived);
             return (
-              <div key={p.id} className={`participant-card ${currentParticipant === p.id ? 'active' : ''} ${dimmed ? 'dimmed' : ''}`}
+              <div key={p.id} className={`participant-card ${currentParticipant === p.id ? 'active' : ''} ${dimmed ? 'dimmed' : ''} ${archived ? 'archived' : ''}`}
                 onClick={() => selectParticipant(p.id)}>
-                <div className="name"><span className={`status-dot ${statusClass}`} />{p.name}</div>
-                <div className="meta">{p.organization} · {getArchetypeLabel(archetypeLabels, p.archetype)}</div>
+                <div className="participant-card-row">
+                  <div className="participant-card-copy">
+                    <div className="name"><span className={`status-dot ${statusClass}`} />{p.name}</div>
+                    <div className="meta">{formatParticipantMeta(archetypeLabels, p)}</div>
+                  </div>
+                  <button
+                    className="participant-action"
+                    disabled={pendingArchiveId === p.id}
+                    onClick={async (e) => {
+                      e.stopPropagation();
+                      setPendingArchiveId(p.id);
+                      try {
+                        await setParticipantArchived(p.id, !archived);
+                      } catch (err: any) {
+                        alert(err.message || 'Failed to update archive state');
+                      } finally {
+                        setPendingArchiveId((current) => current === p.id ? null : current);
+                      }
+                    }}
+                  >
+                    {pendingArchiveId === p.id ? 'Saving...' : archived ? 'Restore' : 'Archive'}
+                  </button>
+                </div>
+                <div className="participant-badges">
+                  {archived && <span className="participant-badge participant-badge-archived">Archived</span>}
+                  {!p.meets_threshold && <span className="participant-badge participant-badge-threshold">Too short for synthesis</span>}
+                </div>
               </div>
             );
           })

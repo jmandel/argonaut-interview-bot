@@ -285,7 +285,7 @@ export function getDefaultFormConfig() {
   return {
     title: "SMART Permission Tickets",
     subtitle: "Discovery Exercise",
-    intro_text: "You're about to have a **15-20 minute conversation** with an AI interviewer about portable authorization in healthcare.\n\nThe interview is designed to surface real requirements by exploring **tradeoffs, tensions, and competing priorities**. The AI will push back on your positions — that's by design. There are no wrong answers; the goal is to understand where you stand and why.\n\nPlease limit your responses to content you are comfortable sharing openly with the Argonaut Project participants to help us make progress on this work.",
+    intro_text: "You're about to have a **15-20 minute conversation** with an AI interviewer about portable authorization in healthcare.\n\nThe interview is designed to surface real requirements by exploring **tradeoffs, tensions, and competing priorities**. The AI will ask follow-up questions, probe for concrete examples, and help surface where things get complicated. There are no wrong answers; the goal is to understand where you stand and why.\n\nPlease limit your responses to content you are comfortable sharing openly with the Argonaut Project participants to help us make progress on this work.",
     fields: [
       { name: "name", label: "Your Name", type: "text", required: true, placeholder: "Jane Smith" },
       { name: "organization", label: "Organization", type: "text", required: false, placeholder: "Acme Health" },
@@ -509,6 +509,17 @@ Start in their world. Ask about their current experience with the problems Permi
 Once you have a basic picture of their reality, transition to the Permission Ticket concept. Briefly introduce the relevant part — in plain language, framed in terms of what would change for them specifically. Keep it to 2-3 sentences. Then ask for their honest reaction. Don't explain the full architecture — explain the outcome. This transition is important: the bulk of the interview's value comes from phases 3 and 4, so don't linger in phase 1.
 
 **Important:** Permission Tickets are not just about identity verification. Each use case has its own ticket schema with a different authorization basis — a patient's consent decision, a caregiver's verified relationship, a public health agency's statutory authority, a referral that grants a CBO scoped access, a research consent, etc. The common thread is that authorization context originating outside the data holder travels to the data holder in a verifiable, machine-readable form. When you introduce the concept, frame it in terms of the use case most relevant to this participant's role — don't default to the patient access framing for everyone.
+
+When introducing the concept, start from the general idea: instead of every data holder relying only on a locally pre-created account, manual approval, or site-by-site registration, a requester can present signed, scoped authorization context from a trusted issuer that the data holder can verify and honor.
+
+Do not define Permission Tickets primarily as "a patient authorizes an app once and it works everywhere" unless the participant is in a patient-facing role. That is one use case, not the umbrella definition.
+
+Frame the example to match the participant's world:
+- For provider organizations, EHR vendors, privacy/governance, and health information networks: emphasize receiving and validating a signed, scoped authorization artifact that explains who should get access, to what, and under what constraints, without treating patient app access as the default story.
+- For public health: emphasize case-specific follow-up access tied to a reportable case or statutory authority.
+- For payers: emphasize claim-specific or workflow-specific access instead of broad trading-partner access.
+- For CBOs and care coordination: emphasize referral-scoped access, often including write-back on a specific referral.
+- For patients, caregivers, and patient app developers: emphasize portable patient- or proxy-directed access across participating sites.
 
 ### Phase 3 — Explore What Matters (3-4 exchanges)
 Build on what they've told you. Use their own stories and pain points as the foundation for exploring deeper questions. When they've described a frustration, ask what "good enough" would look like. When they express a concern, ask them to make it concrete — "Can you give me an example of how that would play out?"

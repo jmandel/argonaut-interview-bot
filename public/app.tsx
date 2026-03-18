@@ -1074,11 +1074,50 @@ function FinalThoughts({ onCancel }: { onCancel: () => void }) {
   );
 }
 
+async function downloadTranscript(token: string | null) {
+  if (!token) return;
+  const resp = await fetch(`${API}/api/transcript/${token}`);
+  const mdText = await resp.text();
+  const blob = new Blob([mdText], { type: 'text/markdown' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'interview-transcript.md';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function CompletionCallout() {
+  const token = useStore(s => s.token);
+  return (
+    <div className="completion-callout">
+      <h3>Thank you for your time</h3>
+      <p>Your input will be synthesized with other participants' responses and shared with Argonaut Project participants to help drive the discussion forward.</p>
+      <p>The goal is to show where the group agrees, where it diverges, and what the real tensions are.</p>
+      <button className="btn" style={{ marginTop: '1rem' }} onClick={() => { void downloadTranscript(token); }}>
+        Download Transcript (.md)
+      </button>
+    </div>
+  );
+}
+
 function ChatScreen() {
+  const screen = useStore(s => s.screen);
   const roleDisplay = useStore(s => s.roleDisplay);
   const nameDisplay = useStore(s => s.nameDisplay);
   const token = useStore(s => s.token);
   const [showFinal, setShowFinal] = useState(false);
+  const completed = screen === 'complete';
+
+  useEffect(() => {
+    if (!completed) return;
+    shouldTail.current = true;
+    const snapToBottom = () => window.scrollTo({ top: document.body.scrollHeight, behavior: 'auto' });
+    requestAnimationFrame(() => {
+      snapToBottom();
+      requestAnimationFrame(snapToBottom);
+    });
+  }, [completed]);
 
   return (
     <div id="chat-screen" style={{ display: 'flex' }}>
@@ -1095,7 +1134,9 @@ function ChatScreen() {
         >View prompt</a>
       </div>
       <ChatMessages />
-      {!showFinal ? (
+      {completed ? (
+        <CompletionCallout />
+      ) : !showFinal ? (
         <>
           <ChatInput />
           <div className="done-area">
@@ -1111,28 +1152,6 @@ function ChatScreen() {
   );
 }
 
-function CompleteScreen() {
-  const token = useStore(s => s.token);
-  return (
-    <div id="complete-screen" style={{ display: 'flex' }}>
-      <div>
-        <h2>Thank you for your time</h2>
-        <p>Your input will be synthesized with other participants' responses and shared with Argonaut Project participants to help drive the discussion forward.</p>
-        <p style={{ marginTop: '0.75rem' }}>The goal is to show where the group agrees, where it diverges, and what the real tensions are.</p>
-        <button className="btn" style={{ marginTop: '1.5rem' }} onClick={async () => {
-          const resp = await fetch(`${API}/api/transcript/${token}`);
-          const mdText = await resp.text();
-          const blob = new Blob([mdText], { type: 'text/markdown' });
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement('a');
-          a.href = url; a.download = 'interview-transcript.md'; a.click();
-          URL.revokeObjectURL(url);
-        }}>Download Transcript (.md)</button>
-      </div>
-    </div>
-  );
-}
-
 function App() {
   const screen = useStore(s => s.screen);
   const initApp = useStore(s => s.initApp);
@@ -1144,8 +1163,7 @@ function App() {
     return () => window.removeEventListener('popstate', handler);
   }, [initApp]);
 
-  if (screen === 'chat') return <ChatScreen />;
-  if (screen === 'complete') return <CompleteScreen />;
+  if (screen === 'chat' || screen === 'complete') return <ChatScreen />;
   return <>
     <JoinScreen />
     <footer className="app-footer">
