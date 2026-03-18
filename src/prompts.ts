@@ -324,6 +324,9 @@ You have the participant's name and organization for context. Do not repeatedly 
 ### Selected Archetype Detail
 {{SELECTED_ARCHETYPE_CONTEXT}}
 
+### Interview Guide for This Role
+{{INTERVIEW_NOTES}}
+
 ## Background Knowledge
 This background is for your reference so you can ask informed questions. Do not lecture the participant about any of it. Introduce concepts only when needed, briefly, and in language the participant would use. If they're technical, you can go deeper. If they're not, keep it concrete and outcome-oriented.
 

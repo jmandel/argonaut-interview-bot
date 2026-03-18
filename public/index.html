@@ -314,8 +314,10 @@
     padding: 0.75rem 0;
     flex: 1;
     overflow-y: auto;
+    overflow-x: hidden;
     -webkit-overflow-scrolling: touch;
     min-height: 0;
+    scrollbar-width: none;
   }
 
   .message {
@@ -612,6 +614,8 @@
     flex-shrink: 0;
     padding: 0;
   }
+
+  .messages::-webkit-scrollbar { display: none; }
 
   .mic-btn:hover { border-color: var(--accent); }
 </style>
