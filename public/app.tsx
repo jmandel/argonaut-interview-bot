@@ -452,20 +452,21 @@ function ChatInput() {
     }
   }, [text]);
 
-  const handleMicFinal = useCallback((final: string) => {
-    // Insert finalized speech at cursor position, like typing
-    const ta = ref.current;
-    if (ta) {
-      const start = ta.selectionStart;
-      setText(prev => prev.slice(0, start) + final + prev.slice(start));
-    } else {
-      setText(prev => prev + final);
-    }
+  const interimLenRef = useRef(0);
+
+  const handleMicUpdate = useCallback((final: string, interim: string) => {
+    setText(prev => {
+      // Strip old interim suffix, append new final + interim
+      const base = prev.slice(0, prev.length - interimLenRef.current);
+      interimLenRef.current = interim.length;
+      return base + final + interim;
+    });
   }, []);
 
   const handleSend = useCallback(() => {
     const val = text.trim();
     if (!val || sending) return;
+    interimLenRef.current = 0;
     setText('');
     sendMessage(val);
     ref.current?.focus();
@@ -474,16 +475,16 @@ function ChatInput() {
   return (
     <div className="input-area">
       <textarea ref={ref} value={text} placeholder="Type your response..."
-        onChange={e => setText(e.target.value)}
+        onChange={e => { interimLenRef.current = 0; setText(e.target.value); }}
         onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
       />
-      <MicButton onFinal={handleMicFinal} inputRef={ref} />
+      <MicButton onUpdate={handleMicUpdate} inputRef={ref} />
       <button className="btn" onClick={handleSend} disabled={sending || !text.trim()}>Send</button>
     </div>
   );
 }
 
-function MicButton({ onFinal, inputRef }: { onFinal: (text: string) => void; inputRef: React.RefObject<HTMLTextAreaElement | null> }) {
+function MicButton({ onUpdate, inputRef }: { onUpdate: (final: string, interim: string) => void; inputRef: React.RefObject<HTMLTextAreaElement | null> }) {
   const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
   const [recording, setRecording] = useState(false);
   const recRef = useRef<any>(null);
@@ -494,17 +495,22 @@ function MicButton({ onFinal, inputRef }: { onFinal: (text: string) => void; inp
   const startRec = () => {
     const rec = new SR();
     rec.continuous = true;
-    rec.interimResults = false;
+    rec.interimResults = true;
     rec.lang = 'en-US';
 
     let processedCount = 0;
     rec.onresult = (e: any) => {
+      let newFinal = '';
+      let interim = '';
       for (let i = processedCount; i < e.results.length; i++) {
         if (e.results[i].isFinal) {
-          onFinal(e.results[i][0].transcript);
+          newFinal += e.results[i][0].transcript;
           processedCount = i + 1;
+        } else {
+          interim += e.results[i][0].transcript;
         }
       }
+      onUpdate(newFinal, interim);
     };
 
     rec.onerror = (e: any) => {
