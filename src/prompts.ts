@@ -3,26 +3,116 @@ export const ARCHETYPES: Record<string, {
   description: string;
   interviewNotes: string;
 }> = {
-  ehr_data_holder: {
-    label: "EHR / Data Holder Organization",
-    description: "Operates FHIR servers, runs authorization infrastructure, bears primary regulatory risk for data disclosure.",
-    interviewNotes: `Their world: They run the systems that store patient data — EHR platforms, FHIR servers, authorization infrastructure. The EHR market is dominated by Epic and Oracle Health, and every data access decision carries legal consequences. They bear HIPAA breach liability for wrongful disclosure. They manage who gets in, how, and under what conditions. They also run Release of Information departments that handle millions of manual data requests per year via fax and phone.
+  ehr_vendor: {
+    label: "EHR Vendor",
+    description: "Builds and certifies the EHR platform — implements FHIR APIs, authorization infrastructure, and app marketplaces. Decides what's technically possible for thousands of customer sites.",
+    interviewNotes: `Their world: They build and maintain the software that hospitals use to store and manage patient data. The market is heavily concentrated — Epic dominates acute care, followed by Oracle Health (formerly Cerner) and MEDITECH. Changes to their platform ripple across thousands of customer sites.
 
-They face a regulatory whipsaw: information blocking rules and TEFCA mandates pressure them to share more data, while HIPAA enforcement and state privacy laws pressure them to protect it more rigorously. When they cite "security" or "privacy" for restricting access, it may be genuine concern, competitive positioning, or both — the people involved often can't cleanly separate these motivations. Even with standardized FHIR APIs, each hospital individually approves and configures each third-party app — a process that can take months per site.
+Every vendor must maintain ONC certification, which now includes rigorous FHIR API requirements (the (g)(10) standardized API criterion is the most demanding Cures Act requirement). They implement SMART on FHIR for authorization, support US Core profiles, and pass third-party testing. Each new regulatory requirement (HTI-1, HTI-2) means engineering investment, re-certification, and coordinated rollout.
 
-What they can tell you about: What it actually takes to validate and grant an access request today. The operational burden of supporting different access patterns (patient apps, payer requests, public health queries, research). How they evaluate risk when someone new asks for data. What their Release of Information operations look like. How information blocking enforcement is affecting their decisions.
+Vendors run app marketplaces — Epic's Showroom, Oracle's Healthcare Marketplace — where third-party developers list integrations. Getting listed requires passing the vendor's security review, but that's only half the battle: each individual hospital customer must separately approve and configure the app, a process that takes weeks to months per site. The vendor builds the capability; the customer decides whether to turn it on.
 
-Avoid asking them to: Speak for patients' preferences, predict what app developers would accept, or evaluate whether identity services are trustworthy. Those are other stakeholders' lanes.
+They face a tension between openness and control. Information blocking enforcement is now real — ONC has begun issuing letters of nonconformity, with civil monetary penalties up to $1M per violation. API fee restrictions are tightening. At the same time, vendors are expanding into the network layer — Epic runs Nexus, Oracle runs its own Health Information Network — meaning they increasingly play dual roles as both platform and exchange infrastructure. Standards work (Argonaut, HL7 FHIR accelerators) is both a cost center and a competitive lever.
+
+What they can tell you about: How they decide which standards to implement and when. What the certification and testing process costs in engineering time. How their app marketplace review works — security review, per-site approval workflow, developer experience. What happens when a new authorization model is proposed — who evaluates it, what criteria they use, how long adoption takes. How they balance regulatory compliance with product roadmap priorities.
+
+Avoid asking them to: Speak for their hospital customers' access policies or security postures. Predict patient reactions to new access models. Evaluate legal defensibility of authorization mechanisms. Comment on competitors' strategies.
 
 Areas to explore:
-- How do requests for data from outside their organization work today? Walk through the process — or a recent decision or policy discussion if that's more relevant to their role.
-- What information do they need before granting access? What makes them say yes vs. no?
-- What are the scariest failure modes — what would go wrong that keeps them up at night?
-- How do they evaluate whether to adopt a new access mechanism? What would they need to see?
-- Where does their current authorization process create friction that they themselves find frustrating?
-- How has information blocking enforcement changed their calculus, if at all?
+- What does implementing a new authorization standard look like inside their organization? From "spec published" to "available in production" — what's the path?
+- How does their app marketplace review work? What do third-party developers experience?
+- How has information blocking enforcement affected their product decisions concretely?
+- When they support a new exchange mechanism (TEFCA, new SMART profiles), what drives the engineering priority vs. other roadmap items?
+- The per-site app approval problem — each hospital separately configuring each app. Is that a feature or a bug from their perspective?
+- What would a new authorization model need to look like for them to prioritize it?
 
-Relevant context: In the Permission Ticket model, data holders would accept signed authorization tokens and bear breach liability if they honor a fraudulent one. They'd need to maintain trusted issuer lists, resolve the subject to a local patient, and enforce all access constraints. HIPAA's "good faith" defense (reliance on valid authorization, credible representation) provides protection for honoring properly verified tokens, but whether that defense feels sufficient to risk-averse compliance teams is an open question.`
+Relevant context: Permission Tickets would require EHR vendors to add support in their authorization servers: accepting signed tickets, validating issuer trust, resolving subjects to local patients, and enforcing access constraints. The spec reuses existing SMART infrastructure (same token endpoint, same client authentication) to minimize implementation surface. But it introduces a new authorization paradigm — shifting from "this client is pre-registered and pre-authorized at this site" to "this client presents a portable authorization grant from a third party." For vendors already running QHINs, there's a question of whether Permission Tickets complement or compete with their existing network exchange mechanisms.`
+  },
+  provider_org: {
+    label: "Healthcare Provider Organization",
+    description: "Hospitals and health systems that hold patient data, bear HIPAA liability, make access policy decisions, run ROI departments, and approve org-selected apps site-by-site.",
+    interviewNotes: `Their world: Hospitals, health systems, academic medical centers, and physician practices — the organizations that run EHR software, operate FHIR servers, manage authorization infrastructure, and bear primary HIPAA liability for data disclosure. They are the "data holders" in the Permission Ticket architecture.
+
+They face a regulatory whipsaw that has intensified. Information blocking penalties are now real — providers risk losing meaningful EHR user status, zeroed MIPS Promoting Interoperability scores, and loss of up to 75% of their Medicare annual payment update. Meanwhile, HIPAA enforcement and state privacy laws pressure them to protect data rigorously. They navigate sensitive data categories: 42 CFR Part 2 (substance use disorder records, with the 2024 reform allowing single-consent for TPO), state-specific HIV laws, mental health protections, and post-Dobbs reproductive health concerns.
+
+There are two fundamentally different app access patterns, and the provider's role differs sharply between them. For org-selected (B2B) apps — clinical decision support, population health tools, operational integrations — the provider organization runs a formal approval process: IT security review, privacy office sign-off, clinical informatics evaluation, sometimes legal review, typically taking 3-12 months per app. App approval committees are common at larger health systems. For patient-facing apps, the dynamic is different: patients are authorized users under HIPAA, and the provider's certified API must be available for patient-selected apps. Blocking or gatekeeping patient app access is itself information blocking. Providers may be uncomfortable with apps their patients choose, but they have limited ability to prevent access without running afoul of the law.
+
+Their Release of Information (ROI) departments handle enormous volumes of records requests via fax, phone, mail, and increasingly digital channels. Third-party ROI vendors (like Datavant) process at scale, but the process involves dozens of steps and must comply with HIPAA's 30-day response requirement. Payer chart retrieval requests for risk adjustment, quality measurement, and prior authorization represent a major administrative burden — and providers often can't distinguish legitimate requests from fishing expeditions.
+
+They also participate in health information networks — many are Carequality implementers, CommonWell participants, TEFCA subparticipants. They operate in a "network of networks" landscape where queries for patient records may come through multiple pathways, each with its own trust framework.
+
+What they can tell you about: What it takes to validate and grant an access request today. How their app approval process works for org-selected apps — and how patient app access differs. The operational burden of supporting different access patterns (patient apps, payer requests, public health queries, network queries). How they evaluate risk when someone new asks for data. What their ROI operations look like. How information blocking enforcement is affecting decisions. Where consent management breaks down.
+
+Avoid asking them to: Speak for patients' preferences. Predict what app developers or payers would accept. Evaluate whether identity services or trust brokers are trustworthy. Design spec internals.
+
+Areas to explore:
+- How do external data requests work today? Walk through the process from receiving a request to fulfilling or denying it.
+- How does app access work at their organization — both org-selected apps and patient-facing apps? How do they think about the difference?
+- How do they handle payer requests for clinical data (risk adjustment, claims, prior auth)? What's the burden?
+- How do they participate in health information networks? What's the experience of responding to network queries?
+- What makes them say yes vs. no to a data access request? What information do they need?
+- What failure modes worry them most?
+- How has information blocking enforcement changed their calculus?
+- How do they handle sensitive data categories when responding to external requests?
+
+Relevant context: In the Permission Ticket model, provider organizations would accept signed authorization tokens from trusted issuers, validate them (verify issuer trust, ticket signature, audience, subject resolution, access constraints), and issue down-scoped access tokens. They'd bear breach liability if they honor a fraudulent ticket — but HIPAA's "good faith" defense applies to reliance on valid authorizations and credible representations. The key question is whether a verified, cryptographically signed ticket from a trusted issuer provides a better audit trail and liability position than the current mix of faxed authorizations, phone calls, and manual ROI processes.`
+  },
+  health_info_network: {
+    label: "Health Information Network",
+    description: "Facilitates data exchange across organizations — operates trust frameworks, participant agreements, and routing infrastructure. Includes QHINs, HIEs, and framework operators.",
+    interviewNotes: `Their world: They are the intermediary organizations that facilitate data exchange between healthcare entities — hospitals, payers, public health agencies, apps. They operate at different scales: national networks (eHealth Exchange, CommonWell, Carequality framework), regional/state HIEs, and TEFCA-designated QHINs (CommonWell, eHealth Exchange, Epic Nexus, Oracle Health Information Network, Health Gorilla, Kno2, MedAllies, Surescripts, and others, with applications open on a rolling basis).
+
+Under TEFCA, QHINs sign the Common Agreement (a legally binding contract with the RCE/Sequoia Project), then contractually obligate their Participants, who obligate their Subparticipants — creating a cascading trust chain that flows down dozens of requirements. Exchange is currently supported for six defined purposes: Treatment, Payment, Health Care Operations, Public Health, Government Benefits Determination, and Individual Access Services (IAS).
+
+The technical infrastructure varies by network. Carequality uses a trust bundle with X.509 certificates and IHE transaction profiles (XCA, XCPD) for query-based document exchange, and is developing FHIR-based exchange guides. CommonWell provides patient ID management, record location, and query/retrieve broker services. TEFCA uses standardized query/response patterns with USCDI data requirements. Epic's CareEverywhere uses proprietary matching and interoperates with non-Epic systems through Carequality.
+
+The business model challenge is fundamental. Many HIEs were seeded by federal grants (HITECH) or state funding, then faced sustainability questions. Revenue comes from membership dues, transaction fees, data services, and TEFCA participation fees. Some are nonprofit, some commercial, some vendor-operated. The tension between being a neutral infrastructure provider and a commercial entity is pervasive.
+
+Governance is where the complexity lives. Trust framework governance determines who can participate, what obligations they have, how disputes are resolved. Identity proofing at IAL2 is required under TEFCA. They see the friction that individual participants only experience from one side — when a payer query doesn't get a response, when patient matching fails, when data format mismatches cause errors.
+
+What they can tell you about: How data exchange actually works across organizational boundaries — the mechanics, the failures, the workarounds. How trust frameworks operate in practice — participant agreements, compliance monitoring, gaps. How identity proofing works at network scale. What happens when a query fails. How different exchange purposes (treatment vs. payment vs. IAS) create different operational dynamics. Business model pressures and how they shape technical and policy decisions.
+
+Avoid asking them to: Speak for individual providers' security concerns or patients' preferences. Predict how EHR vendors would implement new standards. Evaluate clinical merits of specific use cases. Design authorization policy — they implement it, they don't set it.
+
+Areas to explore:
+- How does a query flow through their network today? Walk through the technical and trust layers from requester to responder.
+- What are the most common failure modes when queries fail or return unexpected results?
+- How do they onboard new participants? What does trust establishment look like?
+- How do they handle the different TEFCA exchange purposes operationally? Which are more mature or more friction-prone?
+- What's their relationship with EHR vendors? Where does cooperation work and where does it break down?
+- How do they think about expanding beyond current exchange patterns — new types of authorization or use cases?
+- What's the governance process for policy changes? How long does it take?
+- How do they sustain operations financially?
+
+Relevant context: In the Permission Ticket architecture, health information networks could serve multiple roles. They could be trusted issuers (minting tickets based on verified facts — a case report, a referral, a verified identity). They could be ticket transport infrastructure (carrying tickets alongside queries). They could be trust anchors (their framework membership serves as audience validation — a ticket with aud: "https://network.org" means "any member of this trust framework"). They could maintain trusted issuer lists and revocation infrastructure. The spec's audience validation supports both enumerated recipients (specific data holder URLs) and trust framework identifiers (network membership). For HINs already operating as QHINs, the question is how Permission Tickets relate to their existing exchange purpose framework — do tickets add granularity within existing exchange, or create a parallel authorization pathway?`
+  },
+  payer_health_plan: {
+    label: "Payer / Health Plan",
+    description: "Health insurers that need clinical data from providers for claims, prior auth, risk adjustment, and quality measurement. Subject to CMS interoperability mandates.",
+    interviewNotes: `Their world: Health insurance companies, Medicare Advantage plans, Medicaid managed care organizations — they need clinical data from providers for claims adjudication, prior authorization, risk adjustment (HCC coding drives MA revenue), quality measurement (HEDIS measures feed CMS Star Ratings, which determine quality bonus payments), care management, and utilization review.
+
+Getting clinical data from providers is their most persistent operational pain point. Chart retrieval is a massive industry — third-party vendors like Datavant retrieve millions of records annually, connecting digitally to tens of thousands of sites. But much of this exchange still runs on fax, mail, and phone. Even digital retrieval has friction: different EHRs, different data formats, and patient matching is error-prone. When a payer sends a chart retrieval request, providers often view it with suspicion — is this a legitimate need or a risk adjustment fishing expedition? This "abrasion" strains payer-provider relationships.
+
+CMS interoperability mandates are reshaping their operations. The CMS-0057-F rule requires impacted payers to implement four FHIR-based APIs by January 2027: Patient Access API, Provider Access API, Payer-to-Payer API, and Prior Authorization API. Payer-to-payer exchange must cover claims, encounters, USCDI clinical data, and prior auth information going back to 2016 and up to 5 years after coverage ends.
+
+The Da Vinci Project's FHIR Implementation Guides (PDex, CDex, PAS, DTR, CRD) are becoming the technical standards they must implement. But many payers struggle with FHIR — their core systems are built on legacy claims-processing architectures that don't natively speak FHIR. Much clinical data arrives as unstructured documents (CCDAs, PDFs, faxed records) requiring NLP to structure and code.
+
+Prior authorization is a particular flashpoint. Providers view it as the single greatest source of administrative burden. Payers view it as essential for cost management. CMS-0057-F requires faster turnaround (72 hours urgent, 7 days standard), real-time determination through APIs, and public reporting of denial rates and appeals outcomes.
+
+What they can tell you about: How they currently obtain clinical data from providers — the methods, costs, failure modes. What their FHIR implementation journey looks like. How prior authorization works operationally. How risk adjustment and quality measurement depend on clinical data access. How the CMS interoperability mandates are affecting their technology investments. How they participate in health information networks.
+
+Avoid asking them to: Speak for providers' concerns about data sharing. Predict patient reactions to payer data access. Evaluate clinical quality or appropriateness of care. Design the technical spec.
+
+Areas to explore:
+- How do they currently get clinical data from providers? Walk through the process for a specific use case — chart retrieval, prior auth, claims attachment.
+- Where does clinical data retrieval break down? What are the most common failures?
+- How are they implementing the CMS API mandates? What's the hardest part?
+- How do they participate in health information networks? What works and what doesn't?
+- When they need clinical documentation for a specific claim or prior auth, what's the ideal vs. the reality?
+- How do they handle the "abrasion" with providers — the suspicion, the delays, the non-responses?
+- What would "good enough" clinical data access look like? Speed, scope, format — what matters most?
+
+Relevant context: Permission Tickets have a specific use case for payer claims: a payer requests clinical documents to support a specific claim, with the ticket scoping access to relevant encounters, resource types (DocumentReference, Procedure), and identifying the claim by reference. This is a B2B flow — client key binding is optional, audience validation and client authentication provide the trust boundary. For payers, the appeal is potentially replacing manual chart retrieval with automated, scoped, verifiable requests that providers can validate and fulfill through existing FHIR infrastructure. The question is whether this adds value beyond what Da Vinci CDex and the Provider Access API already offer, and whether providers would actually honor ticket-based requests given the existing trust deficit in payer-provider data exchange.`
   },
   patient_app_developer: {
     label: "Patient App Developer",
@@ -195,7 +285,7 @@ export function getDefaultFormConfig() {
   return {
     title: "SMART Permission Tickets",
     subtitle: "Discovery Exercise",
-    intro_text: "You're about to have a <strong>15-20 minute conversation</strong> with an AI interviewer about portable authorization in healthcare.\n<br /><br />\nThe interview is designed to surface real requirements by exploring <strong>tradeoffs, tensions, and competing priorities</strong>. The AI will push back on your positions — that's by design. There are no wrong answers; the goal is to understand where you stand and why.\n<br /><br />\nPlease limit your responses to content you are comfortable sharing openly with the Argonaut Project participants to help us make progress on this work.",
+    intro_text: "You're about to have a **15-20 minute conversation** with an AI interviewer about portable authorization in healthcare.\n\nThe interview is designed to surface real requirements by exploring **tradeoffs, tensions, and competing priorities**. The AI will push back on your positions — that's by design. There are no wrong answers; the goal is to understand where you stand and why.\n\nPlease limit your responses to content you are comfortable sharing openly with the Argonaut Project participants to help us make progress on this work.",
     fields: [
       { name: "name", label: "Your Name", type: "text", required: true, placeholder: "Jane Smith" },
       { name: "organization", label: "Organization", type: "text", required: false, placeholder: "Acme Health" },
@@ -206,12 +296,49 @@ export function getDefaultFormConfig() {
   };
 }
 
-function formatFullFormConfig(formConfig: unknown): string {
-  try {
-    return JSON.stringify(formConfig, null, 2);
-  } catch {
-    return String(formConfig ?? "");
+function renderFormConfigMarkdown(formConfig: unknown): string {
+  const cfg = formConfig as any;
+  if (!cfg || typeof cfg !== 'object') return String(formConfig ?? '');
+
+  const lines: string[] = ['<form>'];
+
+  // Title and subtitle
+  if (cfg.title) lines.push(`# ${cfg.title}`);
+  if (cfg.subtitle) lines.push(`*${cfg.subtitle}*`);
+  lines.push('');
+
+  if (cfg.intro_text) {
+    lines.push(cfg.intro_text);
+    lines.push('');
   }
+
+  // Form fields
+  if (cfg.fields?.length) {
+    lines.push('## Form Fields');
+    for (const f of cfg.fields) {
+      const req = f.required ? ' *(required)*' : ' *(optional)*';
+      lines.push(`- **${f.label}**${req} — ${f.type}${f.placeholder ? ` (e.g. "${f.placeholder}")` : ''}`);
+    }
+    lines.push('');
+  }
+
+  // Archetypes
+  if (cfg.archetypes?.length) {
+    lines.push('## Participant Roles');
+    lines.push('');
+    for (const a of cfg.archetypes) {
+      lines.push(`### ${a.label}`);
+      if (a.description) lines.push(a.description);
+      if (a.interviewNotes) {
+        lines.push('');
+        lines.push(a.interviewNotes);
+      }
+      lines.push('');
+    }
+  }
+
+  lines.push('</form>');
+  return lines.join('\n');
 }
 
 function formatSelectedArchetypeContext(
@@ -244,6 +371,9 @@ When a participant proposes a solution ("We need a FHIR API"), redirect to the p
 
 Before sending a question, check: Is it compound (asks two things)? Hypothetical ("Would you...")? Leading ("Don't you think...")? Outside their experience? If so, rewrite it.
 
+## Interpreting Participant Messages
+Participants may dictate responses using speech-to-text rather than typing. Expect missing punctuation, run-on sentences, homophones ("their" for "there"), and transcription errors. Read past these — focus on what they mean, not how it's formatted. Never correct their input or ask them to clarify a typo.
+
 ## Staying in Their Lane
 Only ask about things the participant has directly experienced, decided, or observed. Never ask them to speculate about other stakeholders' motivations, predict how other organizations would react, or evaluate technical artifacts they won't control. If you notice you're pulling them outside their experience, redirect to what they know firsthand.
 
@@ -275,18 +405,12 @@ When their own answers reveal a tension, gently reflect it back: "You mentioned 
 Your messages are rendered as markdown (GFM). You can use **bold**, *italics*, lists, and other formatting when it helps readability. Keep it natural — don't over-format conversational responses.
 
 ## Using Clickable Options
-You can offer clickable options by ending your message with lines like "[A] ...", "[B] ...", "[C] ..." after a blank line. By default, options allow multiple selections. Add "[[single]]" before options for mutually exclusive choices, or "[[multi]]" to explicitly signal multi-select. The participant can always ignore options and reply in free text.
+You can offer clickable options by ending your message with lines like "[A] ...", "[B] ...", "[C] ..." after a blank line. By default, options allow multiple selections. If you need mutually exclusive choices, put a line containing only "[[single]]" immediately before the first option. If you want to be explicit about multi-select, put a line containing only "[[multi]]" immediately before the first option. Never append these control markers to option text. The participant can always ignore options and reply in free text.
 
 Don't use options in the first exchange or two. After that, prefer clickable options whenever they can move the conversation forward clearly. They are especially helpful on mobile, where reacting is often easier than composing. Use them to distinguish between competing priorities, test whether a concern is about one thing or another, narrow from a broad reaction to something specific, offer concrete scenarios to react to, or suggest adjacent topics to explore. Use free-text questions when you need a story, an example, or an explanation in the participant's own words. The participant can always ignore options and type something different.
 
 ## Closing
-Before ending:
-- Briefly summarize their core position
-- Ask one clean check-back question, such as "Does that capture your position fairly?" or "What did I miss?"
-- Then, in a separate turn if needed, ask whether there's anything else they want to add
-- Only then, if they're done, thank them and close
-
-If there are adjacent topics that could add value, offer them as options (include "[N] None — I'm good" so they can decline cleanly).
+When wrapping up, do it in one turn: briefly reflect back their core position, then ask a single natural question like "Anything you'd add or change, or does that cover it?" Use options that make it easy to either close or surface one more thing — for example, a couple of specific adjacent topics you didn't explore plus a "That covers it" option. If they have more to say, follow up once and then close. Don't ask multiple rounds of check-back questions.
 
 Do not end prematurely. If the participant is still engaged and raising new points, keep going.
 
@@ -318,8 +442,9 @@ You have the participant's name and organization for context. Do not repeatedly 
 **Role:** {{ROLE_LABEL}}
 **Description:** {{ROLE_DESCRIPTION}}
 
-### Full Form Config
-{{FULL_FORM_CONFIG}}
+## Interview Form and Guidance
+
+{{FULL_FORM_RENDERED}}
 
 ### Selected Archetype Detail
 {{SELECTED_ARCHETYPE_CONTEXT}}
@@ -426,14 +551,16 @@ export function buildSystemPromptFromTemplate(
   const turnStatus = buildTurnStatus(turnCount, activeMinutes);
   const safeParticipantName = participantName?.trim() || "(not provided)";
   const safeParticipantOrganization = participantOrganization?.trim() || "(not provided)";
-  const fullFormConfig = formatFullFormConfig(formConfig);
+  const fullFormRendered = renderFormConfigMarkdown(formConfig);
+  const fullFormJson = (() => { try { return JSON.stringify(formConfig, null, 2); } catch { return ''; } })();
   const selectedArchetypeContext = formatSelectedArchetypeContext(roleLabel, roleDescription);
   const operationalPrompt = getOperationalBasePrompt()
     .replace(/\{\{TURN_STATUS\}\}/g, turnStatus);
   const projectPrompt = template
     .replace(/\{\{PARTICIPANT_NAME\}\}/g, safeParticipantName)
     .replace(/\{\{PARTICIPANT_ORGANIZATION\}\}/g, safeParticipantOrganization)
-    .replace(/\{\{FULL_FORM_CONFIG\}\}/g, fullFormConfig)
+    .replace(/\{\{FULL_FORM_RENDERED\}\}/g, fullFormRendered)
+    .replace(/\{\{FULL_FORM_JSON\}\}/g, fullFormJson)
     .replace(/\{\{SELECTED_ARCHETYPE_CONTEXT\}\}/g, selectedArchetypeContext)
     .replace(/\{\{ROLE_LABEL\}\}/g, roleLabel)
     .replace(/\{\{ROLE_DESCRIPTION\}\}/g, roleDescription)

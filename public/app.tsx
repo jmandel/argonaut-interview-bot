@@ -1,9 +1,17 @@
 import { createRoot } from 'react-dom/client';
 import { create } from 'zustand';
 import { marked } from 'marked';
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useLayoutEffect, type ChangeEvent, type SyntheticEvent } from 'react';
 
-marked.setOptions({ breaks: true, gfm: true });
+marked.use({
+  breaks: true,
+  gfm: true,
+  renderer: {
+    html({ text }: { text: string }) {
+      return text.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    },
+  },
+});
 
 function md(text: string): string {
   return marked.parse(text) as string;
@@ -16,10 +24,14 @@ function mdInline(text: string): string {
 interface Msg { role: 'user' | 'assistant'; content: string; }
 interface ArchetypeInfo { key: string; label: string; description: string; }
 interface ParsedOptions { body: string; options: { letter: string; text: string }[]; multi: boolean; }
+interface TextSelection { start: number; end: number; }
+interface SpeechInsertState { committedEnd: number; interimRange: TextSelection | null; }
 
 // ─── Store ───
-interface AppState {
-  screen: 'join' | 'chat' | 'complete';
+type Screen = 'join' | 'chat' | 'complete';
+
+interface AppStoreState {
+  screen: Screen;
   sessionId: string | null;
   token: string | null;
   archetype: string | null;
@@ -36,15 +48,28 @@ interface AppState {
   sessionName: string;
   roleDisplay: string;
   nameDisplay: string;
+  interviewRequestId: number;
 }
 
-const useStore = create<AppState>(() => ({
+interface AppStoreActions {
+  beginInterviewRequest: () => number;
+  isRequestCurrent: (requestId: number, token?: string) => boolean;
+  resetConversation: (overrides?: Partial<AppStoreState>) => void;
+  applySessionConfig: (formConfig: any) => void;
+  loadSessionConfig: (sid: string, requestId?: number) => Promise<void>;
+  initApp: () => Promise<void>;
+  startInterview: (token: string, requestId?: number) => Promise<void>;
+  resumeInterview: (token: string, requestId?: number) => Promise<void>;
+  sendMessage: (text: string) => Promise<void>;
+  finishInterview: (finalThoughts: string | null) => Promise<void>;
+}
+
+type AppStore = AppStoreState & AppStoreActions;
+
+const conversationDefaults: Pick<AppStoreState, 'screen' | 'token' | 'archetype' | 'messages' | 'streamingContent' | 'isStreaming' | 'sending' | 'turnCount' | 'chatStartTime' | 'lastActivityTime' | 'activeTimeMs' | 'roleDisplay' | 'nameDisplay'> = {
   screen: 'join',
-  sessionId: null,
   token: null,
   archetype: null,
-  archetypes: {},
-  formConfig: null,
   messages: [],
   streamingContent: '',
   isStreaming: false,
@@ -53,15 +78,283 @@ const useStore = create<AppState>(() => ({
   chatStartTime: 0,
   lastActivityTime: 0,
   activeTimeMs: 0,
-  sessionName: '',
   roleDisplay: '',
   nameDisplay: '',
-}));
+};
 
-const set = useStore.setState;
+function buildArchetypeMap(formConfig: any): Record<string, ArchetypeInfo> {
+  const arcMap: Record<string, ArchetypeInfo> = {};
+  (formConfig?.archetypes || []).forEach((a: any) => {
+    arcMap[a.key] = { key: a.key, label: a.label, description: a.description };
+  });
+  return arcMap;
+}
+
+const useStore = create<AppStore>((set, get) => ({
+  ...conversationDefaults,
+  sessionId: null,
+  archetypes: {},
+  formConfig: null,
+  sessionName: '',
+  interviewRequestId: 0,
+
+  beginInterviewRequest: () => {
+    const next = get().interviewRequestId + 1;
+    set({ interviewRequestId: next });
+    return next;
+  },
+
+  isRequestCurrent: (requestId, token) => {
+    const state = get();
+    return state.interviewRequestId === requestId && (token === undefined || state.token === token);
+  },
+
+  resetConversation: (overrides = {}) => {
+    set({ ...conversationDefaults, ...overrides });
+  },
+
+  applySessionConfig: (formConfig) => {
+    set({ formConfig, archetypes: buildArchetypeMap(formConfig) });
+  },
+
+  loadSessionConfig: async (sid, requestId = get().interviewRequestId) => {
+    try {
+      const config = await fetch(`${API}/api/sessions/${sid}/config`).then(r => r.json());
+      if (!get().isRequestCurrent(requestId)) return;
+      if (!config.error && config.form_config) {
+        get().applySessionConfig(config.form_config);
+      }
+    } catch {}
+  },
+
+  initApp: async () => {
+    const { route, token, sessionId } = parseRoute();
+    const requestId = get().beginInterviewRequest();
+
+    if (route !== 'interview') {
+      get().resetConversation({ screen: 'join', sessionId });
+    }
+
+    if (route === 'interview' && token) {
+      try {
+        const p = await fetch(`${API}/api/participants/by-token/${token}`).then(r => r.json());
+        if (!get().isRequestCurrent(requestId)) return;
+        if (p.error) throw new Error(p.error);
+
+        await get().loadSessionConfig(p.session_id, requestId);
+        if (!get().isRequestCurrent(requestId)) return;
+
+        const { archetypes } = get();
+        get().resetConversation({
+          token,
+          sessionId: p.session_id,
+          archetype: p.archetype,
+          roleDisplay: archetypes[p.archetype]?.label || p.archetype,
+          nameDisplay: p.organization ? `${p.name} · ${p.organization}` : p.name,
+          screen: p.status === 'completed' ? 'complete' : 'chat',
+        });
+        if (p.status === 'completed') return;
+
+        await get().resumeInterview(token, requestId);
+        return;
+      } catch {}
+    }
+
+    let sid = sessionId;
+    if (!sid) {
+      const sessions = await fetch(`${API}/api/sessions`).then(r => r.json());
+      const active = sessions.filter((s: any) => s.status === 'active');
+      if (active.length >= 1) {
+        sid = active[0].slug || active[0].id;
+      } else {
+        const created = await fetch(`${API}/api/sessions`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: 'Permission Tickets Discovery' }),
+        }).then(r => r.json());
+        sid = created.slug || created.id;
+      }
+    }
+
+    if (!get().isRequestCurrent(requestId)) return;
+    set({ sessionId: sid });
+    try {
+      const session = await fetch(`${API}/api/sessions/${sid}`).then(r => r.json());
+      if (get().isRequestCurrent(requestId) && !session.error) {
+        set({ sessionName: session.name });
+      }
+    } catch {}
+
+    if (sid) await get().loadSessionConfig(sid, requestId);
+    if (!get().isRequestCurrent(requestId)) return;
+
+    if (route === 'join' && sid) history.pushState(null, '', `/sessions/${sid}`);
+    set({ screen: 'join' });
+  },
+
+  startInterview: async (token, requestId = get().interviewRequestId) => {
+    if (!get().isRequestCurrent(requestId, token)) return;
+    set({ isStreaming: true, streamingContent: '' });
+    const resp = await fetch(`${API}/api/chat/start`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token }),
+    });
+    if (!get().isRequestCurrent(requestId, token)) return;
+
+    if (resp.headers.get('content-type')?.includes('application/json')) {
+      const data = await resp.json();
+      if (!get().isRequestCurrent(requestId, token)) return;
+      set({
+        messages: data.messages,
+        turnCount: data.messages.filter((m: Msg) => m.role === 'user').length,
+        isStreaming: false,
+      });
+      if (data.status === 'completed' && get().isRequestCurrent(requestId, token)) {
+        set({ screen: 'complete' });
+      }
+      return;
+    }
+
+    const result = await readStream(resp, (text) => {
+      if (get().isRequestCurrent(requestId, token)) {
+        set({ streamingContent: text });
+      }
+    });
+    if (!get().isRequestCurrent(requestId, token)) return;
+
+    set(s => ({
+      messages: [...s.messages, { role: 'assistant', content: result.text }],
+      streamingContent: '',
+      isStreaming: false,
+    }));
+    if (result.complete && get().isRequestCurrent(requestId, token)) {
+      set({ screen: 'complete' });
+    }
+  },
+
+  resumeInterview: async (token, requestId = get().interviewRequestId) => {
+    const resp = await fetch(`${API}/api/chat/start`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token }),
+    });
+    if (!get().isRequestCurrent(requestId, token)) return;
+
+    if (resp.headers.get('content-type')?.includes('application/json')) {
+      const data = await resp.json();
+      if (!get().isRequestCurrent(requestId, token)) return;
+      set({
+        messages: data.messages,
+        turnCount: data.messages.filter((m: Msg) => m.role === 'user').length,
+      });
+      if (data.status === 'completed' && get().isRequestCurrent(requestId, token)) {
+        set({ screen: 'complete' });
+      }
+      return;
+    }
+
+    set({ isStreaming: true, streamingContent: '' });
+    const result = await readStream(resp, (text) => {
+      if (get().isRequestCurrent(requestId, token)) {
+        set({ streamingContent: text });
+      }
+    });
+    if (!get().isRequestCurrent(requestId, token)) return;
+
+    set(s => ({
+      messages: [...s.messages, { role: 'assistant', content: result.text }],
+      streamingContent: '',
+      isStreaming: false,
+    }));
+    if (result.complete && get().isRequestCurrent(requestId, token)) {
+      set({ screen: 'complete' });
+    }
+  },
+
+  sendMessage: async (text) => {
+    const requestId = get().interviewRequestId;
+    const { token, turnCount, lastActivityTime, activeTimeMs } = get();
+    if (!token) return;
+
+    const now = Date.now();
+    const gap = lastActivityTime ? Math.min(now - lastActivityTime, 30000) : 0;
+    const newActiveTime = activeTimeMs + gap;
+    const activeMinutes = Math.round(newActiveTime / 60000);
+
+    set(s => ({
+      sending: true,
+      messages: [...s.messages, { role: 'user', content: text }],
+      isStreaming: true,
+      streamingContent: '',
+      turnCount: s.turnCount + 1,
+      activeTimeMs: newActiveTime,
+      lastActivityTime: now,
+    }));
+
+    try {
+      const resp = await fetch(`${API}/api/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token, message: text, turnCount: turnCount + 1, activeMinutes }),
+      });
+      const result = await readStream(resp, (streamText) => {
+        if (get().isRequestCurrent(requestId, token)) {
+          set({ streamingContent: streamText });
+        }
+      });
+      if (!get().isRequestCurrent(requestId, token)) return;
+
+      set(s => ({
+        messages: [...s.messages, { role: 'assistant', content: result.text }],
+        streamingContent: '',
+        isStreaming: false,
+        sending: false,
+      }));
+      if (result.complete && get().isRequestCurrent(requestId, token)) {
+        set({ screen: 'complete' });
+      }
+    } catch (err: any) {
+      if (!get().isRequestCurrent(requestId, token)) return;
+      set(s => ({
+        messages: [...s.messages, { role: 'assistant', content: 'Error: ' + err.message }],
+        streamingContent: '',
+        isStreaming: false,
+        sending: false,
+      }));
+    }
+  },
+
+  finishInterview: async (finalThoughts) => {
+    const requestId = get().interviewRequestId;
+    const { token } = get();
+    if (!token) return;
+
+    if (finalThoughts) {
+      set(s => ({ messages: [...s.messages, { role: 'user', content: finalThoughts }] }));
+    }
+    await fetch(`${API}/api/chat/complete`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token, ...(finalThoughts ? { finalMessage: finalThoughts } : {}) }),
+    });
+    if (get().isRequestCurrent(requestId, token)) {
+      set({ screen: 'complete' });
+    }
+  },
+}));
 
 
 // ─── Option Parsing ───
+function extractOptionMode(text: string): { text: string; multi: boolean | null } {
+  const match = text.match(/\s*\[\[(single|multi)\]\]\s*$/i);
+  if (!match || match.index === undefined) return { text, multi: null };
+  return {
+    text: text.slice(0, match.index).trimEnd(),
+    multi: match[1].toLowerCase() === 'multi',
+  };
+}
+
 function parseOptions(text: string): ParsedOptions {
   const lines = text.split('\n');
   const options: { letter: string; text: string }[] = [];
@@ -72,12 +365,12 @@ function parseOptions(text: string): ParsedOptions {
     const trimmed = lines[i].trim();
     const match = trimmed.match(/^\[([A-Z])\]\s+(.+)$/);
     if (match) {
-      options.unshift({ letter: match[1], text: match[2] });
+      const parsed = extractOptionMode(match[2]);
+      if (parsed.multi !== null) multi = parsed.multi;
+      options.unshift({ letter: match[1], text: parsed.text || match[2] });
       i--;
-    } else if (trimmed === '[[single]]') {
-      multi = false;
-      i--;
-    } else if (trimmed === '[[multi]]') {
+    } else if (/^\[\[(single|multi)\]\]$/i.test(trimmed)) {
+      multi = trimmed.toLowerCase() === '[[multi]]';
       i--;
     } else if (trimmed === '' && options.length > 0) {
       i--;
@@ -87,7 +380,9 @@ function parseOptions(text: string): ParsedOptions {
   }
 
   if (options.length === 0) return { body: text, options: [], multi: false };
-  const body = lines.slice(0, i + 1).join('\n').trimEnd();
+  const parsedBody = extractOptionMode(lines.slice(0, i + 1).join('\n').trimEnd());
+  if (parsedBody.multi !== null) multi = parsedBody.multi;
+  const body = parsedBody.text.trimEnd();
   return { body, options, multi };
 }
 
@@ -149,181 +444,9 @@ function parseRoute() {
   return { route: 'join' as const, sessionId: null as string | null, token: null as string | null };
 }
 
-// ─── Init ───
-async function loadSessionConfig(sid: string) {
-  try {
-    const config = await fetch(`${API}/api/sessions/${sid}/config`).then(r => r.json());
-    if (!config.error && config.form_config) {
-      const arcMap: Record<string, ArchetypeInfo> = {};
-      (config.form_config.archetypes || []).forEach((a: any) => {
-        arcMap[a.key] = { key: a.key, label: a.label, description: a.description };
-      });
-      set({ formConfig: config.form_config, archetypes: arcMap });
-    }
-  } catch {}
-}
-
-async function initApp() {
-  const { route, token, sessionId } = parseRoute();
-
-  if (route === 'interview' && token) {
-    try {
-      const p = await fetch(`${API}/api/participants/by-token/${token}`).then(r => r.json());
-      if (p.error) throw new Error(p.error);
-      // Load session config for this participant's session
-      await loadSessionConfig(p.session_id);
-      const { archetypes: arcMap } = useStore.getState();
-      set({
-        token, sessionId: p.session_id, archetype: p.archetype,
-        roleDisplay: arcMap[p.archetype]?.label || p.archetype,
-        nameDisplay: p.organization ? `${p.name} · ${p.organization}` : p.name,
-      });
-      if (p.status === 'completed') { set({ screen: 'complete' }); return; }
-      set({ screen: 'chat' });
-      await resumeInterview(token);
-      return;
-    } catch {}
-  }
-
-  let sid = sessionId;
-  if (!sid) {
-    const sessions = await fetch(`${API}/api/sessions`).then(r => r.json());
-    const active = sessions.filter((s: any) => s.status === 'active');
-    if (active.length >= 1) {
-      sid = active[0].slug || active[0].id;
-    } else {
-      const created = await fetch(`${API}/api/sessions`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: 'Permission Tickets Discovery' }),
-      }).then(r => r.json());
-      sid = created.slug || created.id;
-    }
-  }
-
-  set({ sessionId: sid });
-  try {
-    const session = await fetch(`${API}/api/sessions/${sid}`).then(r => r.json());
-    if (!session.error) set({ sessionName: session.name });
-  } catch {}
-
-  // Load session config (form_config, archetypes)
-  if (sid) await loadSessionConfig(sid);
-
-  if (route === 'join' && sid) history.pushState(null, '', `/sessions/${sid}`);
-  set({ screen: 'join' });
-}
-
-async function startInterview(token: string) {
-  set({ isStreaming: true, streamingContent: '' });
-  const resp = await fetch(`${API}/api/chat/start`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ token }),
-  });
-
-  if (resp.headers.get('content-type')?.includes('application/json')) {
-    const data = await resp.json();
-    set({
-      messages: data.messages,
-      turnCount: data.messages.filter((m: Msg) => m.role === 'user').length,
-      isStreaming: false,
-    });
-    if (data.status === 'completed') set({ screen: 'complete' });
-    return;
-  }
-
-  const result = await readStream(resp, (text) => set({ streamingContent: text }));
-  set(s => ({
-    messages: [...s.messages, { role: 'assistant', content: result.text }],
-    streamingContent: '',
-    isStreaming: false,
-  }));
-  if (result.complete) set({ screen: 'complete' });
-}
-
-async function resumeInterview(token: string) {
-  const resp = await fetch(`${API}/api/chat/start`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ token }),
-  });
-
-  if (resp.headers.get('content-type')?.includes('application/json')) {
-    const data = await resp.json();
-    set({
-      messages: data.messages,
-      turnCount: data.messages.filter((m: Msg) => m.role === 'user').length,
-    });
-    if (data.status === 'completed') set({ screen: 'complete' });
-  } else {
-    set({ isStreaming: true, streamingContent: '' });
-    const result = await readStream(resp, (text) => set({ streamingContent: text }));
-    set(s => ({
-      messages: [...s.messages, { role: 'assistant', content: result.text }],
-      streamingContent: '',
-      isStreaming: false,
-    }));
-
-    if (result.complete) set({ screen: 'complete' });
-  }
-}
-
-async function sendMessage(text: string) {
-  const { token, turnCount, lastActivityTime, activeTimeMs } = useStore.getState();
-  const now = Date.now();
-  // Add time since last activity, capping idle gaps at 30s
-  const gap = lastActivityTime ? Math.min(now - lastActivityTime, 30000) : 0;
-  const newActiveTime = activeTimeMs + gap;
-  const activeMinutes = Math.round(newActiveTime / 60000);
-
-  set(s => ({
-    sending: true,
-    messages: [...s.messages, { role: 'user', content: text }],
-    isStreaming: true,
-    streamingContent: '',
-    turnCount: s.turnCount + 1,
-    activeTimeMs: newActiveTime,
-    lastActivityTime: now,
-  }));
-
-  try {
-    const resp = await fetch(`${API}/api/chat`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ token, message: text, turnCount: turnCount + 1, activeMinutes }),
-    });
-    const result = await readStream(resp, (t) => set({ streamingContent: t }));
-    set(s => ({
-      messages: [...s.messages, { role: 'assistant', content: result.text }],
-      streamingContent: '',
-      isStreaming: false,
-      sending: false,
-    }));
-
-    if (result.complete) set({ screen: 'complete' });
-  } catch (err: any) {
-    set(s => ({
-      messages: [...s.messages, { role: 'assistant', content: 'Error: ' + err.message }],
-      streamingContent: '',
-      isStreaming: false,
-      sending: false,
-    }));
-  }
-}
-
-async function finishInterview(finalThoughts: string | null) {
-  const { token } = useStore.getState();
-  if (finalThoughts) {
-    set(s => ({ messages: [...s.messages, { role: 'user', content: finalThoughts }] }));
-  }
-  await fetch(`${API}/api/chat/complete`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ token, ...(finalThoughts ? { finalMessage: finalThoughts } : {}) }),
-  });
-  set({ screen: 'complete' });
-}
+// Shared refs so Options and ChatInput can combine MCQ selections + typed text
+const inputDraftRef = { get: () => '', clear: () => {} };
+const optionsRef = { get: () => '' as string, clear: () => {} };
 
 // ─── Components ───
 
@@ -339,14 +462,23 @@ function Options({ options, multi, onSelect }: {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [disabled, setDisabled] = useState(false);
 
+  optionsRef.get = () => multi ? [...selected].join('; ') : '';
+  optionsRef.clear = () => { setSelected(new Set()); setDisabled(true); };
+
   const hint = <span className="options-hint">or type your own answer below</span>;
+
+  const sendWithDraft = (optionText: string) => {
+    const draft = inputDraftRef.get().trim();
+    inputDraftRef.clear();
+    onSelect(draft ? `${optionText}\n\n${draft}` : optionText);
+  };
 
   if (!multi) {
     return (
       <div className="options">
         {options.map(opt => (
           <button key={opt.letter} className="option-btn" disabled={disabled}
-            onClick={() => { setDisabled(true); onSelect(opt.text); }}>
+            onClick={() => { setDisabled(true); sendWithDraft(opt.text); }}>
             <span className="option-indicator radio" />
             <span dangerouslySetInnerHTML={{ __html: mdInline(opt.text) }} />
           </button>
@@ -374,7 +506,7 @@ function Options({ options, multi, onSelect }: {
       <button
         className={`options-submit ${selected.size > 0 ? 'visible' : ''}`}
         disabled={disabled || selected.size === 0}
-        onClick={() => { setDisabled(true); onSelect([...selected].join('; ')); }}
+        onClick={() => { setDisabled(true); sendWithDraft([...selected].join('; ')); }}
       >
         {selected.size > 0 ? `Submit (${selected.size})` : 'Submit'}
       </button>
@@ -384,6 +516,8 @@ function Options({ options, multi, onSelect }: {
 }
 
 function MessageBubble({ msg, isLast }: { msg: Msg; isLast: boolean }) {
+  const sendMessage = useStore(s => s.sendMessage);
+
   if (msg.role === 'user') {
     return <div className="message user">{msg.content}</div>;
   }
@@ -459,15 +593,53 @@ function ChatMessages() {
 function ChatInput() {
   const [text, setText] = useState('');
   const sending = useStore(s => s.sending);
+  const sendMessage = useStore(s => s.sendMessage);
   const rootRef = useRef<HTMLDivElement>(null);
   const ref = useRef<HTMLTextAreaElement>(null);
-  const interimLenRef = useRef(0);
+  const selectionRef = useRef<TextSelection | null>(null);
+  const pendingSelectionRef = useRef<TextSelection | null>(null);
+  const applyingSelectionRef = useRef(false);
+  // Tracks where dictated text is being inserted even if the textarea loses focus.
+  const speechStateRef = useRef<SpeechInsertState | null>(null);
+
+  const clampSelection = useCallback((selection: TextSelection | null, length: number): TextSelection => {
+    if (!selection) return { start: length, end: length };
+    const start = Math.max(0, Math.min(selection.start, length));
+    const end = Math.max(0, Math.min(selection.end, length));
+    return start <= end ? { start, end } : { start: end, end: start };
+  }, []);
+
+  const clearDraft = useCallback(() => {
+    speechStateRef.current = null;
+    selectionRef.current = { start: 0, end: 0 };
+    pendingSelectionRef.current = { start: 0, end: 0 };
+    setText('');
+  }, []);
+
+  inputDraftRef.get = () => text;
+  inputDraftRef.clear = clearDraft;
 
   useEffect(() => {
     if (ref.current) {
       ref.current.scrollTop = ref.current.scrollHeight;
     }
   }, [text]);
+
+  useLayoutEffect(() => {
+    const textarea = ref.current;
+    const pending = pendingSelectionRef.current;
+    if (!textarea || !pending) return;
+    const next = clampSelection(pending, text.length);
+    selectionRef.current = next;
+    if (document.activeElement === textarea) {
+      applyingSelectionRef.current = true;
+      textarea.setSelectionRange(next.start, next.end);
+      queueMicrotask(() => {
+        applyingSelectionRef.current = false;
+      });
+    }
+    pendingSelectionRef.current = null;
+  }, [text, clampSelection]);
 
   useEffect(() => {
     const input = ref.current;
@@ -522,51 +694,160 @@ function ChatInput() {
   }, []);
 
   const handleMicUpdate = useCallback((final: string, interim: string) => {
+    if (!final && !interim) return;
+
     setText(prev => {
-      const base = prev.slice(0, prev.length - interimLenRef.current);
-      interimLenRef.current = interim.length;
-      return base + final + interim;
+      const inserted = final + interim;
+      const speechState = speechStateRef.current;
+      const selection = clampSelection(selectionRef.current, prev.length);
+      const replaceStart = speechState ? speechState.committedEnd : selection.start;
+      const replaceEnd = speechState?.interimRange ? speechState.interimRange.end : (speechState ? speechState.committedEnd : selection.end);
+      const next = prev.slice(0, replaceStart) + inserted + prev.slice(replaceEnd);
+      const committedEnd = replaceStart + final.length;
+      speechStateRef.current = {
+        committedEnd,
+        interimRange: interim
+          ? { start: committedEnd, end: committedEnd + interim.length }
+          : null,
+      };
+      const caret = replaceStart + inserted.length;
+      selectionRef.current = { start: caret, end: caret };
+      pendingSelectionRef.current = { start: caret, end: caret };
+      return next;
     });
-  }, []);
+  }, [clampSelection]);
 
   const handleSend = useCallback(() => {
     const val = text.trim();
-    if (!val || sending) return;
-    interimLenRef.current = 0;
-    setText('');
-    sendMessage(val);
+    const opts = optionsRef.get();
+    if ((!val && !opts) || sending) return;
+    clearDraft();
+    micRestartRef.restartIfRecording();
+    if (opts) optionsRef.clear();
+    const combined = [opts, val].filter(Boolean).join('\n\n');
+    sendMessage(combined);
     ref.current?.focus();
-  }, [text, sending]);
+  }, [clearDraft, text, sending]);
+
+  const handleTextChange = useCallback((e: ChangeEvent<HTMLTextAreaElement>) => {
+    const hadLiveInterim = Boolean(speechStateRef.current?.interimRange);
+    speechStateRef.current = null;
+    selectionRef.current = {
+      start: e.target.selectionStart ?? e.target.value.length,
+      end: e.target.selectionEnd ?? e.target.value.length,
+    };
+    pendingSelectionRef.current = null;
+    setText(e.target.value);
+    if (hadLiveInterim) micRestartRef.restartIfRecording();
+  }, []);
+
+  const handleSelectionChange = useCallback((e: SyntheticEvent<HTMLTextAreaElement>) => {
+    if (applyingSelectionRef.current) return;
+    const target = e.currentTarget;
+    const nextSelection = {
+      start: target.selectionStart ?? target.value.length,
+      end: target.selectionEnd ?? target.value.length,
+    };
+    const speechState = speechStateRef.current;
+
+    if (speechState?.interimRange) {
+      const { start, end } = speechState.interimRange;
+      const interimLength = end - start;
+      const adjustIndex = (index: number) => {
+        if (index <= start) return index;
+        if (index >= end) return index - interimLength;
+        return start;
+      };
+      const adjustedSelection = {
+        start: adjustIndex(nextSelection.start),
+        end: adjustIndex(nextSelection.end),
+      };
+      speechStateRef.current = null;
+      selectionRef.current = adjustedSelection;
+      pendingSelectionRef.current = adjustedSelection;
+      setText(prev => prev.slice(0, start) + prev.slice(end));
+      micRestartRef.restartIfRecording();
+      return;
+    }
+
+    speechStateRef.current = null;
+    selectionRef.current = nextSelection;
+  }, []);
 
   return (
     <div className="input-area" ref={rootRef}>
-      <textarea ref={ref} value={text} placeholder="Type your response..."
-        onChange={e => { interimLenRef.current = 0; setText(e.target.value); }}
+      <textarea ref={ref} value={text} placeholder="Type or tap mic to speak..."
+        onChange={handleTextChange}
+        onSelect={handleSelectionChange}
+        onClick={handleSelectionChange}
+        onKeyUp={handleSelectionChange}
         onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
       />
       <MicButton onUpdate={handleMicUpdate} inputRef={ref} />
 
-      <button className="btn btn-icon send-btn" onClick={handleSend} disabled={sending || !text.trim()} aria-label="Send message" title="Send message">↑</button>
+      <button className="btn btn-icon send-btn" onClick={handleSend} disabled={sending || !text.trim()} aria-label="Send message" title="Send message"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20V4M5 11l7-7 7 7"/></svg></button>
     </div>
   );
 }
+
+// Refs for ChatInput to coordinate microphone state.
+const micSkipRef = { skip: () => {} };
+const micRestartRef = { restartIfRecording: () => {} };
 
 function MicButton({ onUpdate, inputRef }: { onUpdate: (final: string, interim: string) => void; inputRef: React.RefObject<HTMLTextAreaElement | null> }) {
   const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
   const [recording, setRecording] = useState(false);
   const recRef = useRef<any>(null);
   const wantRecordingRef = useRef(false);
+  const activeSessionRef = useRef(0);
 
   if (!SR) return null;
+
+  useEffect(() => {
+    micRestartRef.restartIfRecording = () => {
+      if (!wantRecordingRef.current) return;
+      activeSessionRef.current += 1;
+      const current = recRef.current;
+      recRef.current = null;
+      current?.stop();
+      queueMicrotask(() => {
+        if (!wantRecordingRef.current || recRef.current) return;
+        try {
+          startRec();
+          setRecording(true);
+        } catch (err) {
+          console.error('Failed to restart speech recognition:', err);
+          wantRecordingRef.current = false;
+          setRecording(false);
+        }
+      });
+    };
+
+    return () => {
+      activeSessionRef.current += 1;
+      wantRecordingRef.current = false;
+      recRef.current?.stop();
+      recRef.current = null;
+      micSkipRef.skip = () => {};
+      micRestartRef.restartIfRecording = () => {};
+    };
+  }, []);
 
   const startRec = () => {
     const rec = new SR();
     rec.continuous = true;
     rec.interimResults = true;
     rec.lang = 'en-US';
+    const sessionId = ++activeSessionRef.current;
 
     let processedCount = 0;
+    let lastResultCount = 0;
+    micSkipRef.skip = () => {
+      processedCount = Math.max(processedCount, lastResultCount);
+    };
     rec.onresult = (e: any) => {
+      if (sessionId !== activeSessionRef.current) return;
+      lastResultCount = e.results.length;
       let newFinal = '';
       let interim = '';
       for (let i = processedCount; i < e.results.length; i++) {
@@ -577,20 +858,23 @@ function MicButton({ onUpdate, inputRef }: { onUpdate: (final: string, interim: 
           interim += e.results[i][0].transcript;
         }
       }
-      onUpdate(newFinal, interim);
+      if (newFinal || interim) onUpdate(newFinal, interim);
     };
 
     rec.onerror = (e: any) => {
+      if (sessionId !== activeSessionRef.current) return;
       if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
         console.error('SpeechRecognition error:', e.error);
         wantRecordingRef.current = false;
         setRecording(false);
         recRef.current = null;
+        micSkipRef.skip = () => {};
       }
       // Other errors (network, no-speech) — let onend handle restart
     };
 
     rec.onend = () => {
+      if (sessionId !== activeSessionRef.current) return;
       recRef.current = null;
       if (wantRecordingRef.current) {
         // Browser killed recognition (silence timeout, etc.) — auto-restart
@@ -602,6 +886,7 @@ function MicButton({ onUpdate, inputRef }: { onUpdate: (final: string, interim: 
         }
       } else {
         setRecording(false);
+        micSkipRef.skip = () => {};
       }
     };
 
@@ -611,9 +896,11 @@ function MicButton({ onUpdate, inputRef }: { onUpdate: (final: string, interim: 
 
   const toggle = async () => {
     if (recording) {
+      activeSessionRef.current += 1;
       wantRecordingRef.current = false;
       recRef.current?.stop();
       recRef.current = null;
+      micSkipRef.skip = () => {};
       setRecording(false);
       return;
     }
@@ -631,7 +918,7 @@ function MicButton({ onUpdate, inputRef }: { onUpdate: (final: string, interim: 
   };
 
   return (
-    <button className={`mic-btn ${recording ? 'mic-recording' : ''}`} onClick={toggle}
+    <button className={`mic-btn ${recording ? 'mic-recording' : ''}`} onMouseDown={e => e.preventDefault()} onClick={toggle}
       title={recording ? 'Stop dictation' : 'Dictate'}>
       <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
         <path d="M12 14a3 3 0 003-3V5a3 3 0 10-6 0v6a3 3 0 003 3zm5-3a5 5 0 01-10 0H5a7 7 0 0014 0h-2zm-4 8.93A7.001 7.001 0 0012 20a7.001 7.001 0 00-1-.07V22h2v-2.07z"/>
@@ -646,6 +933,9 @@ function JoinScreen() {
   const formConfig = useStore(s => s.formConfig);
   const sessionId = useStore(s => s.sessionId);
   const sessionName = useStore(s => s.sessionName);
+  const beginInterviewRequest = useStore(s => s.beginInterviewRequest);
+  const resetConversation = useStore(s => s.resetConversation);
+  const startInterview = useStore(s => s.startInterview);
   const [fieldValues, setFieldValues] = useState<Record<string, string>>({});
   const [arch, setArch] = useState('');
   const [customRole, setCustomRole] = useState('');
@@ -659,14 +949,21 @@ function JoinScreen() {
   const introText = formConfig.intro_text;
 
   const customOk = arch !== 'custom' || customRole.trim();
-  const requiredFieldsFilled = fields.filter((f: any) => f.required).every((f: any) => (fieldValues[f.name] || '').trim());
+  const missingRequired = fields.filter((f: any) => f.required && !(fieldValues[f.name] || '').trim());
+  const requiredFieldsFilled = missingRequired.length === 0;
   const ready = requiredFieldsFilled && arch && customOk;
 
-  const hintText = !requiredFieldsFilled && !arch ? 'Enter your name and select a role to continue.'
-    : !requiredFieldsFilled ? 'Fill in the required fields to continue.'
-    : !arch ? 'Select a role to continue.'
-    : !customOk ? 'Describe your role to continue.'
-    : '';
+  const hintText = (() => {
+    const parts: string[] = [];
+    if (missingRequired.length) {
+      const names = missingRequired.map((f: any) => f.label);
+      parts.push(names.length === 1 ? `Enter ${names[0].toLowerCase()}` : `Enter ${names.join(' and ').toLowerCase()}`);
+    }
+    if (!arch) parts.push('select a role');
+    else if (!customOk) parts.push('describe your role');
+    if (!parts.length) return '';
+    return parts[0].charAt(0).toUpperCase() + parts[0].slice(1) + (parts.length > 1 ? ' and ' + parts.slice(1).join(' and ') : '') + ' to continue.';
+  })();
 
   const handleJoin = async () => {
     if (!ready) return;
@@ -681,8 +978,10 @@ function JoinScreen() {
       }).then(r => r.json());
 
       const roleDisplay = arch === 'custom' ? (customRole.trim() || 'Other') : (archetypes[arch]?.label || arch);
-      set({
+      const requestId = beginInterviewRequest();
+      resetConversation({
         token: resp.token,
+        sessionId,
         archetype: arch,
         screen: 'chat',
         roleDisplay,
@@ -692,7 +991,7 @@ function JoinScreen() {
         activeTimeMs: 0,
       });
       history.pushState(null, '', `/sessions/${sessionId}/interviews/${resp.token}`);
-      await startInterview(resp.token);
+      await startInterview(resp.token, requestId);
     } catch (err: any) {
       alert('Failed to join: ' + err.message);
       setJoining(false);
@@ -710,7 +1009,7 @@ function JoinScreen() {
       </div>
 
       {introText && (
-        <div className="welcome-intro" dangerouslySetInnerHTML={{ __html: introText }} />
+        <div className="welcome-intro" dangerouslySetInnerHTML={{ __html: md(introText) }} />
       )}
 
       {fields.map((f: any) => (
@@ -760,6 +1059,7 @@ function JoinScreen() {
 
 function FinalThoughts({ onCancel }: { onCancel: () => void }) {
   const [text, setText] = useState('');
+  const finishInterview = useStore(s => s.finishInterview);
   return (
     <div className="final-thoughts">
       <p>Any final thoughts before we wrap up?</p>
@@ -777,6 +1077,7 @@ function FinalThoughts({ onCancel }: { onCancel: () => void }) {
 function ChatScreen() {
   const roleDisplay = useStore(s => s.roleDisplay);
   const nameDisplay = useStore(s => s.nameDisplay);
+  const token = useStore(s => s.token);
   const [showFinal, setShowFinal] = useState(false);
 
   return (
@@ -787,7 +1088,7 @@ function ChatScreen() {
           <span className="chat-org">{nameDisplay}</span>
         </div>
         <a
-          href={`${API}/api/prompt/${useStore.getState().token}`}
+          href={`${API}/api/prompt/${token}`}
           target="_blank"
           rel="noopener"
           style={{ fontSize: '0.7rem', color: 'var(--text-muted)', textDecoration: 'underline', marginLeft: 'auto', padding: '0.25rem 0.5rem' }}
@@ -834,17 +1135,23 @@ function CompleteScreen() {
 
 function App() {
   const screen = useStore(s => s.screen);
+  const initApp = useStore(s => s.initApp);
 
   useEffect(() => {
     initApp();
     const handler = () => initApp();
     window.addEventListener('popstate', handler);
     return () => window.removeEventListener('popstate', handler);
-  }, []);
+  }, [initApp]);
 
   if (screen === 'chat') return <ChatScreen />;
   if (screen === 'complete') return <CompleteScreen />;
-  return <JoinScreen />;
+  return <>
+    <JoinScreen />
+    <footer className="app-footer">
+      &copy; {new Date().getFullYear()} Josh Mandel &middot; Open source at <a href="https://github.com/jmandel/argonaut-interview-bot" target="_blank" rel="noopener noreferrer">jmandel/argonaut-interview-bot</a>
+    </footer>
+  </>;
 }
 
 createRoot(document.getElementById('root')!).render(<App />);
