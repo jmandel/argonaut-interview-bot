@@ -25,7 +25,7 @@ interface Msg { role: 'user' | 'assistant'; content: string; }
 interface ArchetypeInfo { key: string; label: string; description: string; }
 interface ParsedOptions { body: string; options: { letter: string; text: string }[]; multi: boolean; }
 interface TextSelection { start: number; end: number; }
-interface SpeechInsertState { committedEnd: number; interimRange: TextSelection | null; }
+interface SpeechInsertState { anchorStart: number; activeRange: TextSelection | null; }
 
 // ─── Store ───
 type Screen = 'join' | 'chat' | 'complete';
@@ -693,24 +693,21 @@ function ChatInput() {
     };
   }, []);
 
-  const handleMicUpdate = useCallback((final: string, interim: string) => {
-    if (!final && !interim) return;
+  const handleMicUpdate = useCallback((snapshot: string) => {
+    if (!snapshot) return;
 
     setText(prev => {
-      const inserted = final + interim;
       const speechState = speechStateRef.current;
       const selection = clampSelection(selectionRef.current, prev.length);
-      const replaceStart = speechState ? speechState.committedEnd : selection.start;
-      const replaceEnd = speechState?.interimRange ? speechState.interimRange.end : (speechState ? speechState.committedEnd : selection.end);
-      const next = prev.slice(0, replaceStart) + inserted + prev.slice(replaceEnd);
-      const committedEnd = replaceStart + final.length;
+      const replaceStart = speechState ? speechState.anchorStart : selection.start;
+      const replaceEnd = speechState?.activeRange ? speechState.activeRange.end : selection.end;
+      const next = prev.slice(0, replaceStart) + snapshot + prev.slice(replaceEnd);
+      const activeEnd = replaceStart + snapshot.length;
       speechStateRef.current = {
-        committedEnd,
-        interimRange: interim
-          ? { start: committedEnd, end: committedEnd + interim.length }
-          : null,
+        anchorStart: replaceStart,
+        activeRange: { start: replaceStart, end: activeEnd },
       };
-      const caret = replaceStart + inserted.length;
+      const caret = activeEnd;
       selectionRef.current = { start: caret, end: caret };
       pendingSelectionRef.current = { start: caret, end: caret };
       return next;
@@ -722,7 +719,10 @@ function ChatInput() {
     const opts = optionsRef.get();
     if ((!val && !opts) || sending) return;
     clearDraft();
-    micRestartRef.restartIfRecording();
+    speechStateRef.current = null;
+    selectionRef.current = { start: 0, end: 0 };
+    pendingSelectionRef.current = { start: 0, end: 0 };
+    micRestartRef.resetIfRecording();
     if (opts) optionsRef.clear();
     const combined = [opts, val].filter(Boolean).join('\n\n');
     sendMessage(combined);
@@ -730,7 +730,7 @@ function ChatInput() {
   }, [clearDraft, text, sending]);
 
   const handleTextChange = useCallback((e: ChangeEvent<HTMLTextAreaElement>) => {
-    const hadLiveInterim = Boolean(speechStateRef.current?.interimRange);
+    const hadDictationRange = Boolean(speechStateRef.current?.activeRange);
     speechStateRef.current = null;
     selectionRef.current = {
       start: e.target.selectionStart ?? e.target.value.length,
@@ -738,7 +738,7 @@ function ChatInput() {
     };
     pendingSelectionRef.current = null;
     setText(e.target.value);
-    if (hadLiveInterim) micRestartRef.restartIfRecording();
+    if (hadDictationRange) micRestartRef.resetIfRecording();
   }, []);
 
   const handleSelectionChange = useCallback((e: SyntheticEvent<HTMLTextAreaElement>) => {
@@ -750,33 +750,31 @@ function ChatInput() {
     };
     const speechState = speechStateRef.current;
 
-    if (speechState?.interimRange) {
-      const { start, end } = speechState.interimRange;
-      const interimLength = end - start;
-      const adjustIndex = (index: number) => {
-        if (index <= start) return index;
-        if (index >= end) return index - interimLength;
-        return start;
-      };
-      const adjustedSelection = {
-        start: adjustIndex(nextSelection.start),
-        end: adjustIndex(nextSelection.end),
-      };
+    if (speechState?.activeRange) {
       speechStateRef.current = null;
-      selectionRef.current = adjustedSelection;
-      pendingSelectionRef.current = adjustedSelection;
-      setText(prev => prev.slice(0, start) + prev.slice(end));
-      micRestartRef.restartIfRecording();
+      selectionRef.current = nextSelection;
+      pendingSelectionRef.current = nextSelection;
+      micRestartRef.clearBuffersIfRecording();
       return;
     }
 
+    const previousSelection = selectionRef.current ?? {
+      start: target.value.length,
+      end: target.value.length,
+    };
     speechStateRef.current = null;
     selectionRef.current = nextSelection;
+    if (
+      previousSelection.start !== nextSelection.start ||
+      previousSelection.end !== nextSelection.end
+    ) {
+      micRestartRef.clearBuffersIfRecording();
+    }
   }, []);
 
   return (
     <div className="input-area" ref={rootRef}>
-      <textarea ref={ref} value={text} placeholder="Type or tap mic to speak..."
+      <textarea ref={ref} value={text} placeholder="Type or use mic..."
         onChange={handleTextChange}
         onSelect={handleSelectionChange}
         onClick={handleSelectionChange}
@@ -792,20 +790,54 @@ function ChatInput() {
 
 // Refs for ChatInput to coordinate microphone state.
 const micSkipRef = { skip: () => {} };
-const micRestartRef = { restartIfRecording: () => {} };
+const micRestartRef = {
+  restartIfRecording: () => {},
+  resetIfRecording: () => {},
+  clearBuffersIfRecording: () => {},
+};
+const isAndroidSpeechBrowser = () => /(android)/i.test(navigator.userAgent || '');
 
-function MicButton({ onUpdate, inputRef }: { onUpdate: (final: string, interim: string) => void; inputRef: React.RefObject<HTMLTextAreaElement | null> }) {
+function MicButton({ onUpdate, inputRef }: { onUpdate: (snapshot: string) => void; inputRef: React.RefObject<HTMLTextAreaElement | null> }) {
   const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
   const [recording, setRecording] = useState(false);
   const recRef = useRef<any>(null);
   const wantRecordingRef = useRef(false);
   const activeSessionRef = useRef(0);
+  const isAndroidRef = useRef(false);
+  const committedTextRef = useRef('');
+  const sessionCommittedRef = useRef('');
+  const sessionResultTextsRef = useRef<string[]>([]);
+  const sessionResultFinalRef = useRef<boolean[]>([]);
+  const previousResultWasFinalOnlyRef = useRef(false);
+  const androidFinalTimerRef = useRef<number | null>(null);
 
   if (!SR) return null;
 
   useEffect(() => {
+    isAndroidRef.current = isAndroidSpeechBrowser();
+    const resetRecognitionBuffers = () => {
+      committedTextRef.current = '';
+      sessionCommittedRef.current = '';
+      sessionResultTextsRef.current = [];
+      sessionResultFinalRef.current = [];
+      previousResultWasFinalOnlyRef.current = false;
+      if (androidFinalTimerRef.current !== null) {
+        window.clearTimeout(androidFinalTimerRef.current);
+        androidFinalTimerRef.current = null;
+      }
+    };
+
     micRestartRef.restartIfRecording = () => {
       if (!wantRecordingRef.current) return;
+      committedTextRef.current += sessionCommittedRef.current;
+      sessionCommittedRef.current = '';
+      sessionResultTextsRef.current = [];
+      sessionResultFinalRef.current = [];
+      previousResultWasFinalOnlyRef.current = false;
+      if (androidFinalTimerRef.current !== null) {
+        window.clearTimeout(androidFinalTimerRef.current);
+        androidFinalTimerRef.current = null;
+      }
       activeSessionRef.current += 1;
       const current = recRef.current;
       recRef.current = null;
@@ -822,43 +854,96 @@ function MicButton({ onUpdate, inputRef }: { onUpdate: (final: string, interim: 
         }
       });
     };
+    micRestartRef.resetIfRecording = () => {
+      if (!wantRecordingRef.current) return;
+      resetRecognitionBuffers();
+      activeSessionRef.current += 1;
+      const current = recRef.current;
+      recRef.current = null;
+      current?.stop();
+      queueMicrotask(() => {
+        if (!wantRecordingRef.current || recRef.current) return;
+        try {
+          startRec();
+          setRecording(true);
+        } catch (err) {
+          console.error('Failed to restart speech recognition:', err);
+          wantRecordingRef.current = false;
+          setRecording(false);
+        }
+      });
+    };
+    micRestartRef.clearBuffersIfRecording = () => {
+      if (!wantRecordingRef.current) return;
+      resetRecognitionBuffers();
+    };
 
     return () => {
       activeSessionRef.current += 1;
       wantRecordingRef.current = false;
+      resetRecognitionBuffers();
       recRef.current?.stop();
       recRef.current = null;
       micSkipRef.skip = () => {};
       micRestartRef.restartIfRecording = () => {};
+      micRestartRef.resetIfRecording = () => {};
+      micRestartRef.clearBuffersIfRecording = () => {};
     };
   }, []);
 
   const startRec = () => {
     const rec = new SR();
-    rec.continuous = true;
+    const isAndroid = isAndroidRef.current;
+    rec.continuous = !isAndroid;
     rec.interimResults = true;
     rec.lang = 'en-US';
     const sessionId = ++activeSessionRef.current;
 
-    let processedCount = 0;
-    let lastResultCount = 0;
-    micSkipRef.skip = () => {
-      processedCount = Math.max(processedCount, lastResultCount);
-    };
+    sessionCommittedRef.current = '';
+    sessionResultTextsRef.current = [];
+    sessionResultFinalRef.current = [];
+    previousResultWasFinalOnlyRef.current = false;
+    micSkipRef.skip = () => {};
     rec.onresult = (e: any) => {
       if (sessionId !== activeSessionRef.current) return;
-      lastResultCount = e.results.length;
-      let newFinal = '';
-      let interim = '';
-      for (let i = processedCount; i < e.results.length; i++) {
-        if (e.results[i].isFinal) {
-          newFinal += e.results[i][0].transcript;
-          processedCount = i + 1;
-        } else {
-          interim += e.results[i][0].transcript;
-        }
+      const isAndroid = isAndroidRef.current;
+      const texts = sessionResultTextsRef.current;
+      const finals = sessionResultFinalRef.current;
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const result = e.results[i];
+        const alternative = result[0];
+        texts[i] = alternative.transcript;
+        finals[i] = Boolean(result.isFinal && (!isAndroid || alternative.confidence > 0));
       }
-      if (newFinal || interim) onUpdate(newFinal, interim);
+      texts.length = e.results.length;
+      finals.length = e.results.length;
+
+      let sessionCommitted = '';
+      let interim = '';
+      for (let i = 0; i < texts.length; i++) {
+        if (finals[i]) sessionCommitted += texts[i] || '';
+        else interim += texts[i] || '';
+      }
+
+      const duplicateFinalOnly = !interim && sessionCommitted && previousResultWasFinalOnlyRef.current;
+      previousResultWasFinalOnlyRef.current = !interim && !!sessionCommitted;
+      if (duplicateFinalOnly) return;
+
+      sessionCommittedRef.current = sessionCommitted;
+      const emitSnapshot = () => {
+        const snapshot = committedTextRef.current + sessionCommittedRef.current + interim;
+        if (snapshot) onUpdate(snapshot);
+      };
+
+      if (isAndroid && sessionCommitted) {
+        if (androidFinalTimerRef.current !== null) window.clearTimeout(androidFinalTimerRef.current);
+        androidFinalTimerRef.current = window.setTimeout(() => {
+          androidFinalTimerRef.current = null;
+          emitSnapshot();
+        }, 250);
+      } else {
+        emitSnapshot();
+      }
     };
 
     rec.onerror = (e: any) => {
@@ -877,6 +962,11 @@ function MicButton({ onUpdate, inputRef }: { onUpdate: (final: string, interim: 
       if (sessionId !== activeSessionRef.current) return;
       recRef.current = null;
       if (wantRecordingRef.current) {
+        committedTextRef.current += sessionCommittedRef.current;
+        sessionCommittedRef.current = '';
+        sessionResultTextsRef.current = [];
+        sessionResultFinalRef.current = [];
+        previousResultWasFinalOnlyRef.current = false;
         // Browser killed recognition (silence timeout, etc.) — auto-restart
         try {
           startRec();
@@ -885,6 +975,15 @@ function MicButton({ onUpdate, inputRef }: { onUpdate: (final: string, interim: 
           setRecording(false);
         }
       } else {
+        committedTextRef.current = '';
+        sessionCommittedRef.current = '';
+        sessionResultTextsRef.current = [];
+        sessionResultFinalRef.current = [];
+        previousResultWasFinalOnlyRef.current = false;
+        if (androidFinalTimerRef.current !== null) {
+          window.clearTimeout(androidFinalTimerRef.current);
+          androidFinalTimerRef.current = null;
+        }
         setRecording(false);
         micSkipRef.skip = () => {};
       }
