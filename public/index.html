@@ -412,8 +412,8 @@
     font-family: inherit;
     resize: none;
     outline: none;
-    height: 2.5rem;
-    max-height: 6rem;
+    min-height: 2.5rem;
+    max-height: min(calc(1rem + 1.55em * 50 + 1rem), 50vh);
     overflow-y: auto;
   }
 

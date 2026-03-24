@@ -641,6 +641,14 @@ function ChatInput() {
     pendingSelectionRef.current = null;
   }, [text, clampSelection]);
 
+  // Auto-resize textarea to fit content, up to CSS max-height
+  useLayoutEffect(() => {
+    const ta = ref.current;
+    if (!ta) return;
+    ta.style.height = '0';
+    ta.style.height = `${ta.scrollHeight}px`;
+  }, [text]);
+
   useEffect(() => {
     const input = ref.current;
     const root = rootRef.current;
