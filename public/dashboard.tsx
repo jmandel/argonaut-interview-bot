@@ -90,16 +90,57 @@ const useStore = create<DashState>(() => ({
 }));
 const set = useStore.setState;
 
+// ─── URL State ───
+function pushUrlState() {
+  const { currentSession, currentParticipant, view } = useStore.getState();
+  const params = new URLSearchParams();
+  if (currentSession) params.set('session', currentSession);
+  if (view.type === 'synthesis') {
+    params.set('view', 'synthesis');
+  } else if (view.type === 'create-session') {
+    params.set('view', 'create-session');
+  } else {
+    if (currentParticipant) params.set('participant', currentParticipant);
+    if (view.tab !== 'transcript') params.set('tab', view.tab);
+  }
+  const qs = params.toString();
+  const url = qs ? `${location.pathname}?${qs}` : location.pathname;
+  if (location.search !== `?${qs}` && location.search !== (qs ? `?${qs}` : '')) {
+    history.pushState(null, '', url);
+  }
+}
+
+function readUrlState(): { session?: string; participant?: string; tab?: string; view?: string } {
+  const params = new URLSearchParams(location.search);
+  return {
+    session: params.get('session') || undefined,
+    participant: params.get('participant') || undefined,
+    tab: params.get('tab') || undefined,
+    view: params.get('view') || undefined,
+  };
+}
+
 // ─── Actions ───
 async function loadSessions() {
   const sessions = await fetch(`${API}/api/sessions`).then(r => r.json());
   const sessionsMap: Record<string, any> = {};
   sessions.forEach((s: any) => { sessionsMap[s.id] = s; });
   set({ sessions, sessionsMap });
-  if (sessions.length === 1) selectSession(sessions[0].id);
+
+  const urlState = readUrlState();
+  if (urlState.view === 'create-session') {
+    set({ view: { type: 'create-session' }, currentSession: null, currentParticipant: null });
+    return;
+  }
+  const targetSession = urlState.session && sessionsMap[urlState.session] ? urlState.session : null;
+  if (targetSession) {
+    await selectSession(targetSession, urlState.participant, urlState.tab as any, urlState.view === 'synthesis');
+  } else if (sessions.length === 1) {
+    selectSession(sessions[0].id);
+  }
 }
 
-async function selectSession(id: string) {
+async function selectSession(id: string, restoreParticipant?: string, restoreTab?: 'transcript' | 'analysis', restoreSynthesis?: boolean) {
   const { sessionsMap } = useStore.getState();
   set({
     currentSession: id,
@@ -114,33 +155,45 @@ async function selectSession(id: string) {
     fetchParticipantsList(id),
     fetch(`${API}/api/sessions/${id}/config`).then(r => r.json()).catch(() => null),
   ]);
+  const participantsMap = mapParticipants(list);
   set({
-    participants: mapParticipants(list),
+    participants: participantsMap,
     archetypeLabels: config?.form_config ? buildArchetypeLabels(config.form_config) : {},
   });
-  const defaultParticipantId = getDefaultParticipantId(list);
-  if (defaultParticipantId) {
-    await selectParticipant(defaultParticipantId);
-  }
-  connectSSE(id);
+
   try {
     const data = await fetch(`${API}/api/sessions/${id}/synthesis`).then(r => r.json());
     if (!data.error) set({ synthesis: data });
     else set({ synthesis: null });
   } catch { set({ synthesis: null }); }
+
+  if (restoreSynthesis) {
+    set({ view: { type: 'synthesis' }, currentParticipant: null });
+  } else {
+    const targetParticipant = restoreParticipant && participantsMap[restoreParticipant]
+      ? restoreParticipant
+      : getDefaultParticipantId(list);
+    if (targetParticipant) {
+      await selectParticipant(targetParticipant, restoreTab);
+    }
+  }
+  connectSSE(id);
+  pushUrlState();
 }
 
-async function selectParticipant(id: string) {
-  set({ currentParticipant: id, view: { type: 'participant', tab: 'transcript' } });
+async function selectParticipant(id: string, tab?: 'transcript' | 'analysis') {
+  set({ currentParticipant: id, view: { type: 'participant', tab: tab || 'transcript' } });
   const [transcript, analysisData] = await Promise.all([
     fetch(`${API}/api/participants/${id}/transcript`).then(r => r.json()),
     fetch(`${API}/api/participants/${id}/analysis`).then(r => r.json()),
   ]);
   set({ transcript, analysis: analysisData.analysis || null });
+  pushUrlState();
 }
 
 async function showSynthesis() {
   set({ view: { type: 'synthesis' }, currentParticipant: null });
+  pushUrlState();
 }
 
 async function runSynthesis() {
@@ -257,7 +310,7 @@ function Header() {
     <div className="header">
       <h1>Facilitator Dashboard</h1>
       <div className="header-actions">
-        <button className="btn btn-outline" onClick={() => set({ view: { type: 'create-session' }, currentSession: null, currentParticipant: null })}>
+        <button className="btn btn-outline" onClick={() => { set({ view: { type: 'create-session' }, currentSession: null, currentParticipant: null }); pushUrlState(); }}>
           + New Session
         </button>
         <select value={currentSession || ''} onChange={e => { if (e.target.value) selectSession(e.target.value); }}
@@ -527,15 +580,40 @@ function CreateSessionView() {
 
 function TranscriptView() {
   const transcript = useStore(s => s.transcript);
+  const bottomRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const shouldTail = useRef(true);
+  const prevLength = useRef(0);
+
+  useEffect(() => {
+    const container = containerRef.current?.closest('.panel');
+    if (!container) return;
+    const onScroll = () => {
+      shouldTail.current = container.scrollHeight - container.scrollTop - container.clientHeight < 60;
+    };
+    container.addEventListener('scroll', onScroll);
+    return () => container.removeEventListener('scroll', onScroll);
+  }, []);
+
+  useEffect(() => {
+    if (transcript.length !== prevLength.current) {
+      prevLength.current = transcript.length;
+      if (shouldTail.current) {
+        bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+      }
+    }
+  }, [transcript]);
+
   if (transcript.length === 0) return <div className="empty-state">Select a participant to view their transcript</div>;
   return (
-    <div>
+    <div ref={containerRef}>
       {transcript.map((m: any, i: number) => (
         <div key={i} className={`transcript-msg ${m.role}`}>
           <div className="role-label">{m.role}</div>
           <div dangerouslySetInnerHTML={{ __html: md(m.content) }} />
         </div>
       ))}
+      <div ref={bottomRef} />
     </div>
   );
 }
@@ -683,7 +761,7 @@ function ParticipantPanel() {
       <div className="tabs">
         {(['transcript', 'analysis'] as const).map(t => (
           <div key={t} className={`tab ${tab === t ? 'active' : ''}`}
-            onClick={() => set({ view: { type: 'participant', tab: t } })}>
+            onClick={() => { set({ view: { type: 'participant', tab: t } }); pushUrlState(); }}>
             {t.charAt(0).toUpperCase() + t.slice(1)}
           </div>
         ))}
@@ -720,7 +798,19 @@ function CenterPanel() {
 }
 
 function Dashboard() {
-  useEffect(() => { loadSessions(); }, []);
+  useEffect(() => {
+    loadSessions();
+    const onPopState = () => {
+      const url = readUrlState();
+      if (url.view === 'create-session') {
+        set({ view: { type: 'create-session' }, currentSession: null, currentParticipant: null });
+      } else if (url.session) {
+        selectSession(url.session, url.participant, url.tab as any, url.view === 'synthesis');
+      }
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
   const view = useStore(s => s.view);
 
   return (
