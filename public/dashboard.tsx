@@ -599,7 +599,7 @@ function TranscriptView() {
     if (transcript.length !== prevLength.current) {
       prevLength.current = transcript.length;
       if (shouldTail.current) {
-        bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+        bottomRef.current?.scrollIntoView();
       }
     }
   }, [transcript]);
@@ -648,7 +648,7 @@ function SynthesisView() {
 
   useEffect(() => {
     if (streamText != null) {
-      bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+      bottomRef.current?.scrollIntoView();
     }
   }, [streamText]);
 
