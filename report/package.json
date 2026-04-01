@@ -1,0 +1,22 @@
+{
+  "name": "permission-ticket-interview-report",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "generate": "bun run src/build.ts",
+    "build": "bun run generate && bun build index.html --outdir dist",
+    "dev": "bun run generate && bun --hot src/dev-server.ts"
+  },
+  "dependencies": {
+    "marked": "^17.0.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "yaml": "^2.7.1",
+    "zustand": "^5.0.5"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0"
+  }
+}

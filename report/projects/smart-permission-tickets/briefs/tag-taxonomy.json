@@ -1,0 +1,123 @@
+{
+  "$schema": "Taxonomy of controlled values for brief frontmatter. Each axis is independent. Values should be applied only when the brief substantively engages with the topic — not merely mentions it in passing.",
+
+  "archetype": {
+    "description": "Primary stakeholder category",
+    "values": [
+      "ehr_vendor",
+      "app_developer",
+      "payer",
+      "patient",
+      "provider_org",
+      "caregiver",
+      "consent_vendor",
+      "consultant"
+    ]
+  },
+
+  "org_size": {
+    "description": "Approximate organizational scale",
+    "values": ["small", "mid", "large", "government", "individual"]
+  },
+
+  "stance": {
+    "description": "Overall posture toward Permission Tickets",
+    "values": {
+      "supportive": "Sees clear value, wants to build/use it",
+      "conditional": "Supportive but with significant caveats or preconditions",
+      "skeptical": "Questions value proposition or feasibility",
+      "philosophical": "Engages at the architectural/paradigm level more than the practical"
+    }
+  },
+
+  "use_cases": {
+    "description": "Permission Ticket use cases the participant substantively engaged with",
+    "values": {
+      "patient_access": "Patient-directed access to their own records across systems",
+      "payer_claims": "Payer requesting clinical data for claims, prior auth, risk adjustment",
+      "public_health": "Public health agency follow-up queries after case reports",
+      "care_coordination": "Referrals, CBO access, provider-to-provider consults",
+      "caregiver_proxy": "Caregiver or authorized representative accessing on behalf of patient",
+      "cds_hooks": "CDS Hooks token exchange / clinical decision support integration",
+      "notifications": "Long-lived subscription/notification access across systems",
+      "research": "Research consent and data access",
+      "write_access": "Writing data back to remote systems (referral status, task updates)"
+    }
+  },
+
+  "spec_topics": {
+    "description": "Spec design areas the participant had substantive positions on",
+    "values": {
+      "trust_establishment": "How data holders decide which issuers to trust",
+      "issuer_model": "Who issues tickets — data holders, third parties, apps, networks",
+      "scoping": "Granularity of access constraints in the ticket (resource types, conditions, time)",
+      "consent_representation": "How patient consent is encoded/conveyed in or alongside the ticket",
+      "org_identity": "Conveying the requesting organization's identity in SMART flows",
+      "token_lifetime": "Duration of grants, refresh patterns, revocation",
+      "purpose_of_use": "How purpose-of-use is coded and consumed by business rules",
+      "client_binding": "Tying tickets to specific client keys to prevent misuse",
+      "subject_resolution": "Matching ticket subject to local patient identity",
+      "ds4p": "Data Segmentation for Privacy — sensitive data categories",
+      "format_alignment": "Alignment with UDAP, HL7 Consent, Scalable Consent Management",
+      "discoverability": "Machine-readable publication of which issuers a data holder accepts",
+      "deployment_model": "How the spec gets packaged/distributed (containers, open source)",
+      "category_authorization": "Approving classes of requesters rather than individual apps",
+      "data_holder_issuance": "Data holder as ticket issuer (not just consumer)"
+    }
+  },
+
+  "concerns": {
+    "description": "Risks, failure modes, or barriers the participant raised",
+    "values": {
+      "adoption_barriers": "Organizational, cultural, or prioritization barriers to adoption",
+      "workforce_gap": "Staff/developers don't understand FHIR or modern auth well enough",
+      "vendor_lock_in": "Risk of vendors gatekeeping or adding cost layers",
+      "over_provisioning": "Granting broader access than necessary or intended",
+      "data_segmentation_limits": "EHR platforms can't reliably enforce granular data filtering",
+      "consent_not_verifiable": "Responding systems can't verify patient actually consented",
+      "provider_resistance": "Providers refusing to honor credentials or accept partial records",
+      "issuer_viability": "No clear business model for independent consent/identity issuers",
+      "spec_proliferation": "Risk of divergent or duplicative standards",
+      "scope_governance": "Difficulty reaching consensus on purpose-of-use or scope categories",
+      "security_blast_radius": "Compromised credentials enabling broad unauthorized access",
+      "partial_record_acceptance": "Receiving providers unwilling to act on redacted/incomplete data"
+    }
+  },
+
+  "frameworks_referenced": {
+    "description": "Standards, regulations, or frameworks substantively discussed (not just name-dropped)",
+    "values": [
+      "TEFCA",
+      "Carequality",
+      "CMS-0057",
+      "SMART",
+      "FHIR",
+      "OAuth2",
+      "UDAP",
+      "DS4P",
+      "HL7v2",
+      "CDA",
+      "X12",
+      "IHE",
+      "HIPAA",
+      "42CFR",
+      "OCAP",
+      "US_Core",
+      "CDS_Hooks"
+    ]
+  },
+
+  "key_terms": {
+    "description": "Distinctive concepts, metaphors, or framings introduced by this participant. Free-form — not from a controlled vocabulary. Use lowercase_snake_case.",
+    "examples": [
+      "costco_membership_card",
+      "castle_and_drawbridge",
+      "humpty_dumpty_syndrome",
+      "bootstrap_from_one_portal",
+      "credit_card_network_trust",
+      "care_journey_scoping",
+      "membrane_around_data",
+      "category_based_authorization"
+    ]
+  }
+}
