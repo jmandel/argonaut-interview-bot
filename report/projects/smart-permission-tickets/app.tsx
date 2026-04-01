@@ -1,9 +1,9 @@
 import React, { useState, useMemo, useCallback } from "react";
 import { createRoot } from "react-dom/client";
 import { marked } from "marked";
-import { briefs, digest, methodology, taxonomy } from "./data";
-import type { Brief, FilterAxis } from "./types";
-import { FILTER_AXES } from "./types";
+import { briefs, digest, methodology, taxonomy } from "../../src/data";
+import type { Brief, FilterAxis } from "../../src/types";
+import { FILTER_AXES } from "../../src/types";
 import "./styles.css";
 
 const AXIS_LABELS: Record<FilterAxis, string> = {

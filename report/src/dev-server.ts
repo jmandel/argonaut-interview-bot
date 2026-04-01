@@ -1,9 +1,13 @@
 import index from "../index.html";
+import project from "../projects/smart-permission-tickets/index.html";
+
+const port = parseInt(process.env.PORT || "3456");
 
 Bun.serve({
-  port: parseInt(process.env.PORT || "3456"),
+  port,
   routes: {
     "/": index,
+    "/smart-permission-tickets": project,
   },
   development: {
     hmr: true,
@@ -11,4 +15,4 @@ Bun.serve({
   },
 });
 
-console.log(`Dev server running at http://localhost:${parseInt(process.env.PORT || "3456")}`);
+console.log(`Dev server running at http://localhost:${port}`);

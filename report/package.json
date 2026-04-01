@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "generate": "bun run src/build.ts",
-    "build": "bun run generate && bun build index.html --outdir dist",
+    "build": "bun run generate && bun build projects/smart-permission-tickets/index.html --outdir dist/smart-permission-tickets && cp index.html dist/index.html",
     "dev": "bun run generate && bun --hot src/dev-server.ts"
   },
   "dependencies": {

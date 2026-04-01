@@ -3,11 +3,45 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>SMART Permission Tickets — Stakeholder Interview Report</title>
-  <link rel="stylesheet" href="./src/styles.css" />
+  <title>Argonaut Project — Stakeholder Interview Reports</title>
+  <style>
+    :root {
+      --bg: #ffffff; --surface: #f8f9fa; --border: #e0e0e0;
+      --text: #1a1a1a; --text-muted: #666; --accent: #2563eb;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0f0f0f; --surface: #1a1a1a; --border: #333;
+        --text: #e5e5e5; --text-muted: #999; --accent: #60a5fa;
+      }
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      background: var(--bg); color: var(--text); line-height: 1.6;
+      padding: 3rem 2rem;
+      max-width: 700px; margin: 0 auto;
+    }
+    h1 { font-size: 1.5rem; font-weight: 600; margin-bottom: 0.5rem; }
+    p { color: var(--text-muted); margin-bottom: 2rem; font-size: 0.9375rem; }
+    .project-card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 0.5rem; padding: 1.25rem 1.5rem;
+      text-decoration: none; color: var(--text); display: block;
+      margin-bottom: 1rem; transition: border-color 0.15s;
+    }
+    .project-card:hover { border-color: var(--accent); }
+    .project-card h2 { font-size: 1.125rem; font-weight: 600; margin-bottom: 0.25rem; }
+    .project-card .meta { font-size: 0.8125rem; color: var(--text-muted); }
+  </style>
 </head>
 <body>
-  <div id="root"></div>
-  <script type="module" src="./src/app.tsx"></script>
+  <h1>Argonaut Project — Stakeholder Interview Reports</h1>
+  <p>AI-mediated stakeholder discovery interviews, distilled into browsable analytical briefs.</p>
+
+  <a class="project-card" href="./smart-permission-tickets/">
+    <h2>SMART Permission Tickets</h2>
+    <div class="meta">23 interviews — EHR vendors, app developers, payers, patients, providers, caregivers, and more</div>
+  </a>
 </body>
 </html>
